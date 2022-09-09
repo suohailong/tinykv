@@ -19,6 +19,7 @@ type MemStorage struct {
 }
 
 func NewMemStorage() *MemStorage {
+	// 三颗红黑树
 	return &MemStorage{
 		CfDefault: llrb.New(),
 		CfLock:    llrb.New(),
