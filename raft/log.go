@@ -30,23 +30,28 @@ type RaftLog struct {
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
+	// 大多数状态机都确认过提交的日志位置
 	committed uint64
 
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
+	// 当前node，日志提交到了什么位置，还没有commit
 	applied uint64
 
 	// log entries with index <= stabled are persisted to storage.
 	// It is used to record the logs that are not persisted by storage yet.
 	// Everytime handling `Ready`, the unstabled logs will be included.
+	// 已经持久化保存的日志的位置,也就说持久化到了什么位置
 	stabled uint64
 
 	// all entries that have not yet compact.
+	// 日志
 	entries []pb.Entry
 
 	// the incoming unstable snapshot, if any.
 	// (Used in 2C)
+	// 当前节点正在应用的快照
 	pendingSnapshot *pb.Snapshot
 
 	// Your Data Here (2A).
@@ -56,7 +61,22 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	return nil
+	first, err := storage.FirstIndex()
+	last, err := storage.LastIndex()
+
+	entries, _ := storage.Entries(first, last+1)
+
+	hardState, _, err := storage.InitialState()
+	if err != nil {
+		return nil
+	}
+	return &RaftLog{
+		storage:   storage,
+		committed: hardState.Commit,
+		applied:   first - 1,
+		stabled:   last,
+		entries:   entries,
+	}
 }
 
 // We need to compact the log entries in some point of time like
@@ -87,5 +107,8 @@ func (l *RaftLog) LastIndex() uint64 {
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
+	if uint64(len(l.entries)) > i {
+		return l.entries[i].GetTerm(), nil
+	}
 	return 0, nil
 }
