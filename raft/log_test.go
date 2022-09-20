@@ -23,9 +23,9 @@ func TestNewLog(t *testing.T) {
 
 	storage.Append(entries)
 
-	fmt.Println(storage.ents)
+	fmt.Println(11111, storage.ents)
 
 	l := newLog(storage)
-	fmt.Println(l)
+	fmt.Println(22222, l)
 
 }

@@ -14,7 +14,11 @@
 
 package raft
 
-import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+import (
+	"fmt"
+
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+)
 
 // RaftLog manage the log entries, its struct look like:
 //
@@ -62,7 +66,9 @@ type RaftLog struct {
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	first, err := storage.FirstIndex()
+	fmt.Println("first:", first)
 	last, err := storage.LastIndex()
+	fmt.Println("last:", last)
 
 	entries, _ := storage.Entries(first, last+1)
 
