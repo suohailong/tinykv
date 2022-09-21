@@ -109,6 +109,9 @@ func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
 	return 0
 }
+func (l *RaftLog) RemoveAfter(index uint64) bool {
+	return true
+}
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {

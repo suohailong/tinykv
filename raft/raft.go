@@ -410,7 +410,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	}
 
 	// TODO: 这里没有做完
-	_, err := r.RaftLog.Term(peerIndex)
+	peerTerm, err := r.RaftLog.Term(peerIndex)
 	if err != nil {
 		return false
 	}
@@ -426,8 +426,11 @@ func (r *Raft) sendAppend(to uint64) bool {
 		From:    r.id,
 		To:      to,
 		Term:    r.Term,
-		Index:   r.RaftLog.LastIndex(),
+		LogTerm: peerTerm,
+		Index:   peerIndex,
 		Entries: sendEntries,
+		// TODO: 这块不理解
+		Commit: r.RaftLog.committed,
 	})
 
 	return false
@@ -568,18 +571,50 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
+	// 当前任期大于领导者任期返回假
 	if r.Term > m.Term {
+		r.sendAppendResponse(m.From, VOTE_REJECT)
+		return
 	}
 
-	// 1. 先取出日志
-
-	// 2. 放到本地raftlog
-	for _, entry := range m.Entries {
-		r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+	term, err := r.RaftLog.Term(m.GetIndex())
+	if err != nil || term != m.LogTerm {
+		// 日志条目的任期或索引不匹配
+		r.sendAppendResponse(m.From, VOTE_REJECT)
+		return
 	}
 
-	// 3. 发送响应
+	// 处理冲突追加日志
+	if len(m.Entries) > 0 {
+		appendStart := 0
+		for i, entry := range m.Entries {
+			if entry.GetIndex() > r.RaftLog.LastIndex() {
+				appendStart = i
+				break
+			}
+			term, _ := r.RaftLog.Term(entry.GetIndex())
+			if term != entry.GetTerm() {
+				r.RaftLog.RemoveAfter(entry.GetIndex())
+				break
+			}
+			appendStart = i
+		}
+		if m.Entries[appendStart].GetIndex() > r.RaftLog.LastIndex() {
+			for i := appendStart; i < len(m.Entries); i++ {
+				r.RaftLog.entries = append(r.RaftLog.entries, *m.Entries[i])
+			}
+		}
+	}
 
+	// 如果leader commit > current commit 将当前commit替换成leadercommit和上一条新日志索引的较小值
+	if r.RaftLog.committed < m.Commit {
+		lastNewEntry := m.Index
+		if len(m.Entries) > 0 {
+			lastNewEntry = m.Entries[len(m.Entries)-1].GetIndex()
+		}
+		r.RaftLog.committed = min(m.Commit, lastNewEntry)
+	}
+	r.sendAppendResponse(m.From, VOTE_APPROVE)
 }
 
 // handleHeartbeat handle Heartbeat RPC request
