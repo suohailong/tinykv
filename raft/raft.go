@@ -300,6 +300,7 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 	r.Lead = r.id
 
+	// 当领导者初次获得权力，必须初始化所有的跟随者的吓一跳日志位置为当前领导者最新日志的索引+1
 	for _, v := range r.Prs {
 		v.Match = 0
 		v.Next = r.RaftLog.LastIndex() + 1
@@ -428,7 +429,22 @@ func (r *Raft) setpLeader(m pb.Message) error {
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
 	case pb.MessageType_MsgPropose:
-		// 处理写入
+		// 写入日志
+		latestIndex := r.RaftLog.LastIndex()
+		ents := make([]*pb.Entry, 0)
+		for _, e := range m.Entries {
+			ents = append(ents, &pb.Entry{
+				EntryType: e.EntryType,
+				Term:      e.Term,
+				Index:     latestIndex + 1,
+				Data:      e.Data,
+			})
+			latestIndex += 1
+		}
+		r.appendEntries(ents...)
+		// 广播
+		r.bcastAppend()
+
 	case pb.MessageType_MsgSnapshot:
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
