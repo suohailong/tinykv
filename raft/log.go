@@ -15,7 +15,7 @@
 package raft
 
 import (
-	"fmt"
+	"errors"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -59,6 +59,7 @@ type RaftLog struct {
 	pendingSnapshot *pb.Snapshot
 
 	// Your Data Here (2A).
+	firstIndex uint64
 }
 
 // newLog returns log using the given storage. It recovers the log
@@ -66,9 +67,7 @@ type RaftLog struct {
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	first, err := storage.FirstIndex()
-	fmt.Println("first:", first)
 	last, err := storage.LastIndex()
-	fmt.Println("last:", last)
 
 	entries, _ := storage.Entries(first, last+1)
 
@@ -77,12 +76,16 @@ func newLog(storage Storage) *RaftLog {
 		return nil
 	}
 	return &RaftLog{
-		storage:   storage,
-		committed: hardState.Commit,
-		applied:   first - 1,
-		stabled:   last,
-		entries:   entries,
+		storage:    storage,
+		committed:  hardState.Commit,
+		applied:    first - 1,
+		stabled:    last,
+		entries:    entries,
+		firstIndex: first,
 	}
+}
+func (l *RaftLog) appendEntries(entries ...pb.Entry) {
+	l.entries = append(l.entries, entries...)
 }
 
 // We need to compact the log entries in some point of time like
@@ -103,11 +106,22 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	return nil
 }
+func (l *RaftLog) Entries(lo, hi uint64) []pb.Entry {
+	if lo >= l.firstIndex && hi-l.firstIndex <= uint64(len(l.entries)) {
+		return l.entries[lo-l.firstIndex : hi-l.firstIndex]
+	}
+	ents, _ := l.storage.Entries(lo, hi)
+	return ents
+}
 
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return 0
+	if len(l.entries) > 0 {
+		return l.entries[len(l.entries)-1].Index
+	}
+	index, _ := l.storage.FirstIndex()
+	return index - 1
 }
 func (l *RaftLog) RemoveAfter(index uint64) bool {
 	return true
@@ -116,8 +130,15 @@ func (l *RaftLog) RemoveAfter(index uint64) bool {
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	if uint64(len(l.entries)) > i {
-		return l.entries[i].GetTerm(), nil
+	if len(l.entries) > 0 && i >= l.firstIndex {
+		if i > l.LastIndex() {
+			return 0, errors.New("ErrUnavailable")
+		}
+		return l.entries[i-l.firstIndex].Term, nil
 	}
-	return 0, nil
+	term, err := l.storage.Term(i)
+	if err != nil {
+		return 0, errors.New("storageTermErr")
+	}
+	return term, nil
 }

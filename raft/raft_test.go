@@ -1605,6 +1605,7 @@ func (nw *network) send(msgs ...pb.Message) {
 		m := msgs[0]
 		p := nw.peers[m.To]
 		p.Step(m)
+		//fmt.Printf("%d 发送消息: %v  给 %d\n", m.From, m.GetMsgType(), m.To)
 		msgs = append(msgs[1:], nw.filter(p.readMessages())...)
 	}
 }
