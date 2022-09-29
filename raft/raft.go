@@ -168,8 +168,11 @@ type Raft struct {
 	// (Used in 3A conf change)
 	PendingConfIndex uint64
 
-	// 当前票数统计
+	// 当前赞成票
 	voteCount int
+
+	// 当前不赞成票
+	denialCount int
 
 	config *Config
 }
@@ -260,6 +263,7 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.State = StateFollower
 	r.votes = make(map[uint64]bool)
 	r.voteCount = 0
+	r.denialCount = 0
 
 	//TODO ???:这个值有疑问
 	r.leadTransferee = 0
@@ -274,6 +278,7 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	r.voteCount = 0
+	r.denialCount = 0
 	r.State = StateCandidate
 	r.Vote = r.id
 	r.Term++
@@ -435,7 +440,7 @@ func (r *Raft) setpLeader(m pb.Message) error {
 		for _, e := range m.Entries {
 			ents = append(ents, &pb.Entry{
 				EntryType: e.EntryType,
-				Term:      e.Term,
+				Term:      r.Term,
 				Index:     latestIndex + 1,
 				Data:      e.Data,
 			})
@@ -444,7 +449,7 @@ func (r *Raft) setpLeader(m pb.Message) error {
 		r.appendEntries(ents...)
 		// 广播
 		r.bcastAppend()
-
+		r.commit()
 	case pb.MessageType_MsgSnapshot:
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
@@ -521,7 +526,12 @@ func (r *Raft) sendAppend(to uint64) bool {
 	entries := r.RaftLog.Entries(peerIndex+1, lastIndex+1)
 	sendEntries := make([]*pb.Entry, 0)
 	for _, entry := range entries {
-		sendEntries = append(sendEntries, &entry)
+		sendEntries = append(sendEntries, &pb.Entry{
+			EntryType: entry.EntryType,
+			Term:      entry.Term,
+			Index:     entry.Index,
+			Data:      entry.Data,
+		})
 	}
 
 	r.msgs = append(r.msgs, pb.Message{
@@ -621,9 +631,13 @@ func (r *Raft) handleVoteResponse(m pb.Message) {
 	r.votes[m.From] = !m.Reject
 	if !m.Reject {
 		r.voteCount++
+	} else {
+		r.denialCount++
 	}
 	if r.voteCount > len(r.Prs)/2 {
 		r.becomeLeader()
+	} else if r.denialCount > len(r.Prs)/2 {
+		r.becomeFollower(r.Term, r.Lead)
 	}
 }
 
@@ -631,6 +645,7 @@ func (r *Raft) handleVoteResponse(m pb.Message) {
 func (r *Raft) handleRequestVote(m pb.Message) {
 	latestIndex := r.RaftLog.LastIndex()
 	latestTerm, _ := r.RaftLog.Term(latestIndex)
+
 	if r.Term > m.GetTerm() {
 		r.sendRequestVoteResponse(m.From, VOTE_REJECT)
 		return
@@ -664,7 +679,9 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 
 	// TODO: 这里为什么能是fllower在日志小于对方的时候才能投赞成票，为什么candidate不行
 	// 任期相同比较日志, 只适用于fllower
-	if r.State == StateFollower && r.Vote == None && latestTerm < m.Term || (latestTerm == m.Term && latestIndex < m.GetIndex()) {
+	if r.State == StateFollower &&
+		r.Vote == None &&
+		(latestTerm < m.Term || (latestTerm == m.Term && latestIndex <= m.GetIndex())) {
 		r.sendRequestVoteResponse(m.From, VOTE_APPROVE)
 		return
 	}

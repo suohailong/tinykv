@@ -678,7 +678,6 @@ func TestRecvMessageType_MsgRequestVote2AB(t *testing.T) {
 		term := max(lterm, tt.logTerm)
 		sm.Term = term
 		sm.Step(pb.Message{MsgType: msgType, Term: term, From: 2, Index: tt.index, LogTerm: tt.logTerm})
-
 		msgs := sm.readMessages()
 		if g := len(msgs); g != 1 {
 			t.Fatalf("#%d: len(msgs) = %d, want 1", i, g)

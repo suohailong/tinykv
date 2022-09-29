@@ -40,7 +40,7 @@ type RaftLog struct {
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
-	// 当前node，日志提交到了什么位置，还没有commit
+	// 当前node，日志应用到了什么位置，还没有commit
 	applied uint64
 
 	// log entries with index <= stabled are persisted to storage.
@@ -59,6 +59,7 @@ type RaftLog struct {
 	pendingSnapshot *pb.Snapshot
 
 	// Your Data Here (2A).
+	// first index in storage
 	firstIndex uint64
 }
 
@@ -98,12 +99,20 @@ func (l *RaftLog) maybeCompact() {
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
+	if len(l.entries) > 0 && l.stabled+1 >= l.firstIndex {
+		return l.entries[l.stabled-l.firstIndex+1:]
+	}
 	return nil
 }
 
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
+	if len(l.entries) > 0 {
+		start := l.applied - l.firstIndex + 1
+		end := min(l.committed-l.firstIndex+1, uint64(len(l.entries)))
+		return l.entries[start:end]
+	}
 	return nil
 }
 func (l *RaftLog) Entries(lo, hi uint64) []pb.Entry {
@@ -123,8 +132,14 @@ func (l *RaftLog) LastIndex() uint64 {
 	index, _ := l.storage.FirstIndex()
 	return index - 1
 }
-func (l *RaftLog) RemoveAfter(index uint64) bool {
-	return true
+func (l *RaftLog) RemoveAfter(index uint64) {
+	// 因为删除了日志，所以需要调整l.stable指针
+	l.stabled = min(l.stabled, index-1)
+
+	if index-l.firstIndex >= uint64(len(l.entries)) {
+		return
+	}
+	l.entries = l.entries[:index-l.firstIndex]
 }
 
 // Term return the term of the entry in the given index
