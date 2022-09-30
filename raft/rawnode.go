@@ -71,7 +71,8 @@ type Ready struct {
 type RawNode struct {
 	Raft *Raft
 	// Your Data Here (2A).
-	preReady Ready
+	preSoftState *SoftState
+	preHardState pb.HardState
 }
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.
@@ -81,9 +82,14 @@ func NewRawNode(config *Config) (*RawNode, error) {
 
 	return &RawNode{
 		Raft: r,
-		preReady: Ready{
-			SoftState: &SoftState{},
-			HardState: pb.HardState{},
+		preHardState: pb.HardState{
+			Term:   r.Term,
+			Commit: r.RaftLog.committed,
+			Vote:   r.Vote,
+		},
+		preSoftState: &SoftState{
+			Lead:      r.Lead,
+			RaftState: r.State,
 		},
 	}, nil
 }
@@ -165,25 +171,31 @@ func (rn *RawNode) Ready() Ready {
 		rd.Messages = rn.Raft.msgs
 	}
 
-	softState := &SoftState{
-		Lead:      rn.Raft.Lead,
-		RaftState: rn.Raft.State,
+	if rn.preSoftState.Lead != rn.Raft.Lead ||
+		rn.preSoftState.RaftState != rn.Raft.State {
+		rn.preSoftState.Lead = rn.Raft.Lead
+		rn.preSoftState.RaftState = rn.Raft.State
+		rd.SoftState = rn.preSoftState
 	}
-	if *rn.preReady.SoftState != *softState {
-		rd.SoftState = softState
-	}
+
+	// softState := &SoftState{
+	// 	Lead:      rn.Raft.Lead,
+	// 	RaftState: rn.Raft.State,
+	// }
+	// if *rn.preReady.SoftState != *softState {
+	// 	rd.SoftState = softState
+	// }
 
 	hardState := pb.HardState{
 		Term:   rn.Raft.Term,
 		Vote:   rn.Raft.Vote,
 		Commit: rn.Raft.RaftLog.committed,
 	}
-	if !reflect.DeepEqual(rn.preReady.HardState, hardState) {
+	if !reflect.DeepEqual(rn.preHardState, hardState) {
 		rd.HardState = hardState
 	}
 	// 清理消息
 	rn.Raft.msgs = make([]pb.Message, 0)
-	rn.preReady = rd
 	return rd
 }
 
@@ -191,9 +203,9 @@ func (rn *RawNode) Ready() Ready {
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
 
-	if rn.preReady.HardState.Commit != rn.Raft.RaftLog.committed ||
-		rn.preReady.HardState.Vote != rn.Raft.Vote ||
-		rn.preReady.HardState.Term != rn.Raft.Term {
+	if rn.preHardState.Commit != rn.Raft.RaftLog.committed ||
+		rn.preHardState.Vote != rn.Raft.Vote ||
+		rn.preHardState.Term != rn.Raft.Term {
 		return true
 	}
 
@@ -218,7 +230,9 @@ func (rn *RawNode) Advance(rd Ready) {
 		rn.Raft.RaftLog.applied = rd.CommittedEntries[len(rd.CommittedEntries)-1].GetIndex()
 	}
 
-	rn.preReady = rd
+	if !(rd.HardState.Commit == 0 && rd.HardState.Vote == 0 && rd.HardState.Term == 0) {
+		rn.preHardState = rd.HardState
+	}
 }
 
 // GetProgress return the Progress of this node and its peers, if this

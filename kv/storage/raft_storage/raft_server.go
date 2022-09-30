@@ -1,3 +1,4 @@
+// 类似于standalone_storage  实现了对数据的读写存储
 package raft_storage
 
 import (
