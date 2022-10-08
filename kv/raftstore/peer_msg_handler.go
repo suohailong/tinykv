@@ -9,7 +9,9 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/runner"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/snap"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/log"
+	"github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/raft_cmdpb"
 	rspb "github.com/pingcap-incubator/tinykv/proto/pkg/raft_serverpb"
@@ -37,12 +39,35 @@ func newPeerMsgHandler(peer *peer, ctx *GlobalContext) *peerMsgHandler {
 		ctx:  ctx,
 	}
 }
+func (d *peerMsgHandler) process(en eraftpb.Entry, wb engine_util.WriteBatch) {}
 
 func (d *peerMsgHandler) HandleRaftReady() {
 	if d.stopped {
 		return
 	}
 	// Your Code Here (2B).
+	if d.peer.RaftGroup.HasReady() {
+		ready := d.peer.RaftGroup.Ready()
+		// 日志持久化到storage
+		snap, err := d.peerStorage.SaveReadyState(&ready)
+		if err != nil {
+			log.Errorf("save ready state failed: %v", err)
+			panic(err)
+		}
+		// 发送消息给其他peer
+		d.Send(d.ctx.trans, ready.Messages)
+		// 应用命令
+		if len(ready.CommittedEntries) > 0 {
+			wb := engine_util.WriteBatch{}
+			for _, en := range ready.CommittedEntries {
+				d.process(en, wb)
+
+			}
+		}
+		d.peer.RaftGroup.Advance(ready)
+
+	}
+
 }
 
 func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
@@ -107,6 +132,43 @@ func (d *peerMsgHandler) preProposeRaftCommand(req *raft_cmdpb.RaftCmdRequest) e
 	return err
 }
 
+func (d *peerMsgHandler) getRequestKey(request *raft_cmdpb.Request) []byte {
+	switch request.CmdType {
+	case raft_cmdpb.CmdType_Get:
+		return request.Get.Key
+	case raft_cmdpb.CmdType_Delete:
+		return request.Delete.Key
+	case raft_cmdpb.CmdType_Put:
+		return request.Put.Key
+	}
+	return nil
+}
+func (d *peerMsgHandler) proposalNormalRequest(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
+	if key := d.getRequestKey(msg.Requests[0]); key != nil {
+		if err := util.CheckKeyInRegion(key, d.Region()); err != nil {
+			cb.Done(ErrResp(err))
+			return
+		}
+	}
+	// 提交日志
+	msgBytes, err := msg.Marshal()
+	if err != nil {
+		// 这里为什么要求程序崩溃
+		panic(err)
+	}
+	// 记录命令回调
+	d.proposals = append(d.proposals, &proposal{
+		index: d.nextProposalIndex(),
+		term:  d.Term(),
+		cb:    cb,
+	})
+	err = d.peer.RaftGroup.Propose(msgBytes)
+	if err != nil {
+		cb.Done(ErrResp(err))
+		return
+	}
+}
+
 func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
 	err := d.preProposeRaftCommand(msg)
 	if err != nil {
@@ -114,6 +176,13 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		return
 	}
 	// Your Code Here (2B).
+	if msg.AdminRequest == nil {
+		// 处理正常的读写命令
+		d.proposalNormalRequest(msg, cb)
+	} else {
+		// 处理管理命令
+	}
+
 }
 
 func (d *peerMsgHandler) onTick() {
