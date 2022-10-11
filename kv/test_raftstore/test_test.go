@@ -176,6 +176,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		cfg.RegionSplitSize = 200
 	}
 	cluster := NewTestCluster(nservers, cfg)
+	// 启动5个store
 	cluster.Start()
 	defer cluster.Shutdown()
 
@@ -264,6 +265,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			log.Warnf("restart servers\n")
 			// crash and re-start all
 			for i := 1; i <= nservers; i++ {
+				// fmt.Println("start server", i)
 				cluster.StartServer(uint64(i))
 			}
 		}

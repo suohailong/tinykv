@@ -255,6 +255,7 @@ func (bs *Raftstore) start(
 	}
 
 	for _, peer := range regionPeers {
+		// fmt.Println("start peer: ", i, peer.regionId, peer.Meta.GetId(), peer.Meta.GetStoreId())
 		bs.router.register(peer)
 	}
 	bs.startWorkers(regionPeers)

@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -159,9 +160,12 @@ func (rn *RawNode) Step(m pb.Message) error {
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
 	// Your Code Here (2A).
+
+	fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "myid: ", rn.Raft.id, "state:", rn.Raft.State.String(), "leader:", rn.Raft.Lead, "current entris:", len(rn.Raft.RaftLog.entries))
 	// 读取需要需要持久化的日志
 	unStableEntries := rn.Raft.RaftLog.unstableEntries()
 	committedEntries := rn.Raft.RaftLog.nextEnts()
+	fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "myid: ", rn.Raft.id, "state:", rn.Raft.State.String(), "leader:", rn.Raft.Lead, "获取unstable")
 
 	rd := Ready{
 		Entries:          unStableEntries,

@@ -72,7 +72,9 @@ func (d *peerMsgHandler) processNormalRequest(en eraftpb.Entry, msg *raft_cmdpb.
 		p := d.proposals[0]
 		if p.index == en.Index {
 			if p.term == en.Term {
-				resp := &raft_cmdpb.RaftCmdResponse{}
+				resp := &raft_cmdpb.RaftCmdResponse{
+					Header: &raft_cmdpb.RaftResponseHeader{},
+				}
 				switch req.CmdType {
 				case raft_cmdpb.CmdType_Get:
 					d.peerStorage.applyState.AppliedIndex = en.GetIndex()
@@ -95,19 +97,28 @@ func (d *peerMsgHandler) processNormalRequest(en eraftpb.Entry, msg *raft_cmdpb.
 				case raft_cmdpb.CmdType_Put:
 					resp.Responses = []*raft_cmdpb.Response{
 						{
-							CmdType: raft_cmdpb.CmdType_Get,
+							CmdType: raft_cmdpb.CmdType_Put,
 							Put:     &raft_cmdpb.PutResponse{},
 						},
 					}
 				case raft_cmdpb.CmdType_Delete:
 					resp.Responses = []*raft_cmdpb.Response{
 						{
-							CmdType: raft_cmdpb.CmdType_Get,
+							CmdType: raft_cmdpb.CmdType_Delete,
 							Delete:  &raft_cmdpb.DeleteResponse{},
 						},
 					}
 				case raft_cmdpb.CmdType_Snap:
 					// TODO: 处理快照
+					resp.Responses = []*raft_cmdpb.Response{
+						{
+							CmdType: raft_cmdpb.CmdType_Snap,
+							Snap: &raft_cmdpb.SnapResponse{
+								Region: d.Region(),
+							},
+						},
+					}
+					p.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
 				}
 				p.cb.Done(resp)
 

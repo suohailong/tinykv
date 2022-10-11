@@ -308,7 +308,36 @@ func ClearMeta(engines *engine_util.Engines, kvWB, raftWB *engine_util.WriteBatc
 // never be committed
 func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.WriteBatch) error {
 	// Your Code Here (2B).
+	if len(entries) == 0 {
+		return nil
+	}
+	first, _ := ps.FirstIndex()
+	last := entries[0].Index + uint64(len(entries)) - 1
+	// 需要插入的日志最后一个索引比当前引擎第一个索引还小，无需插入
+	if last < first {
+		return nil
+	}
+	// last, _ := ps.LastIndex()
+	// 截断entries,因为第一个元素的index比first还小
+	if first > entries[0].Index {
+		entries = entries[first-entries[0].Index:]
+	}
 
+	// 保存日志
+	for _, entry := range entries {
+		raftWB.SetMeta(meta.RaftLogKey(ps.region.GetId(), entry.Index), &entry)
+	}
+
+	plast, _ := ps.LastIndex()
+	if last < plast {
+		for i := last; i <= plast; i++ {
+			raftWB.DeleteMeta(meta.RaftLogKey(ps.region.GetId(), i))
+		}
+	}
+
+	//更新状态
+	ps.raftState.LastIndex = last
+	ps.raftState.LastTerm = entries[len(entries)-1].Term
 	return nil
 }
 
