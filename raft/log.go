@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -67,15 +68,23 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	first, err := storage.FirstIndex()
-	last, err := storage.LastIndex()
-
-	entries, _ := storage.Entries(first, last+1)
 
 	hardState, _, err := storage.InitialState()
 	if err != nil {
-		return nil
+		panic(err)
 	}
+
+	first, _ := storage.FirstIndex()
+	last, _ := storage.LastIndex()
+	entries := make([]pb.Entry, 0)
+	if first <= last {
+		entries, err = storage.Entries(first, last+1)
+		if err != nil {
+			panic(err)
+		}
+	}
+	fmt.Printf("newlog first: %d, last:%d, storage entries len: %d\n", first, last, len(entries))
+
 	return &RaftLog{
 		storage:    storage,
 		committed:  hardState.Commit,

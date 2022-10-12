@@ -308,19 +308,22 @@ func ClearMeta(engines *engine_util.Engines, kvWB, raftWB *engine_util.WriteBatc
 // never be committed
 func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.WriteBatch) error {
 	// Your Code Here (2B).
-	if len(entries) == 0 {
+	if len(entries) <= 0 {
 		return nil
 	}
-	first, _ := ps.FirstIndex()
-	last := entries[0].Index + uint64(len(entries)) - 1
+	psFirst, _ := ps.FirstIndex()
+	psLast, _ := ps.LastIndex()
+
+	appendFirst := entries[0].Index
+	appendLast := entries[len(entries)-1].Index
 	// 需要插入的日志最后一个索引比当前引擎第一个索引还小，无需插入
-	if last < first {
+	if appendLast < psFirst {
 		return nil
 	}
 	// last, _ := ps.LastIndex()
 	// 截断entries,因为第一个元素的index比first还小
-	if first > entries[0].Index {
-		entries = entries[first-entries[0].Index:]
+	if appendFirst < psFirst {
+		entries = entries[psFirst-appendFirst:]
 	}
 
 	// 保存日志
@@ -328,15 +331,15 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 		raftWB.SetMeta(meta.RaftLogKey(ps.region.GetId(), entry.Index), &entry)
 	}
 
-	plast, _ := ps.LastIndex()
-	if last < plast {
-		for i := last; i <= plast; i++ {
+	// plast, _ := ps.LastIndex()
+	if appendLast < psLast {
+		for i := appendLast + 1; i <= psLast; i++ {
 			raftWB.DeleteMeta(meta.RaftLogKey(ps.region.GetId(), i))
 		}
 	}
 
 	//更新状态
-	ps.raftState.LastIndex = last
+	ps.raftState.LastIndex = appendLast
 	ps.raftState.LastTerm = entries[len(entries)-1].Term
 	return nil
 }
@@ -363,10 +366,11 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	// Your Code Here (2B/2C).
 	raftWB := &engine_util.WriteBatch{}
 	var result *ApplySnapResult
+	var err error
 	// 保存快照
 	if !raft.IsEmptySnap(&ready.Snapshot) {
 		kvWB := &engine_util.WriteBatch{}
-		ps.ApplySnapshot(&ready.Snapshot, kvWB, raftWB)
+		result, err = ps.ApplySnapshot(&ready.Snapshot, kvWB, raftWB)
 		kvWB.WriteToDB(ps.Engines.Kv)
 	}
 
@@ -378,7 +382,7 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	}
 	raftWB.SetMeta(meta.RaftStateKey(ps.region.GetId()), ps.raftState)
 	raftWB.WriteToDB(ps.Engines.Raft)
-	return result, nil
+	return result, err
 }
 
 func (ps *PeerStorage) ClearData() {

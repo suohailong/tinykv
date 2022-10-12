@@ -351,7 +351,10 @@ func (r *Raft) appendEntries(entries ...*pb.Entry) {
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
-	fmt.Println("store:", "[", r.id, "]", "recive msgs:", m, "myid: ", r.id, "state:", r.State.String(), "leader:", r.Lead, "current entris:", len(r.RaftLog.entries))
+	fmt.Println("store:", "[", r.id, "]", "recive msgs:", m, "state:", r.State.String(), "leader:",
+		"term:", r.Term,
+		"raftlog:", "{", r.RaftLog.stabled, r.RaftLog.committed, r.RaftLog.applied, r.RaftLog.firstIndex, "}",
+		r.Lead, "current entris len:", len(r.RaftLog.entries))
 	switch r.State {
 	case StateFollower:
 		return r.setpFollower(m)
