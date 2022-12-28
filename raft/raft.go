@@ -795,6 +795,29 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
+	// follower 会处理这个消息, 重建raft状态机
+	meta := m.GetSnapshot().GetMetadata()
+	if m.Term < r.Term || meta.Index <= r.RaftLog.committed {
+		// 消息中任期小说明leader过期
+		// 日志小于当前follower已提交日志说明, 说明leader的日志不是最新的,等待后续日志对齐
+		return
+	}
+	r.becomeFollower(m.Term, m.From)
+	// 当前已提交，当前已应用，当前已经持久化的日志都和快照索引对齐
+	r.RaftLog.committed = meta.Index
+	r.RaftLog.applied = meta.Index
+	r.RaftLog.stabled = meta.Index
+	// 当前已经提交的日志都清空
+	r.RaftLog.entries = nil
+	// 当前正在应用的快照赋值
+	r.RaftLog.pendingSnapshot = m.Snapshot
+
+	// 当前记录的其他节点的进度信息清空
+	r.Prs = make(map[uint64]*Progress)
+	for _, id := range meta.ConfState.Nodes {
+		r.Prs[id] = &Progress{}
+	}
+
 }
 
 // addNode add a new node to raft group

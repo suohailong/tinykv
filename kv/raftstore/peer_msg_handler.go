@@ -132,6 +132,20 @@ func (d *peerMsgHandler) processNormalRequest(en eraftpb.Entry, msg *raft_cmdpb.
 	return wb
 }
 
+func (d *peerMsgHandler) processAdminRequest(en eraftpb.Entry, msg *raft_cmdpb.RaftCmdRequest, wb *engine_util.WriteBatch) *engine_util.WriteBatch {
+	req := msg.AdminRequest
+	switch req.CmdType {
+	case raft_cmdpb.AdminCmdType_CompactLog:
+		applystate := d.peerStorage.applyState
+		if req.CompactLog.CompactIndex >= applystate.TruncatedState.Index {
+			applystate.TruncatedState.Index = req.CompactLog.CompactIndex
+			applystate.TruncatedState.Term = req.CompactLog.CompactTerm
+			wb.SetMeta(meta.ApplyStateKey(d.regionId), applystate)
+		}
+	}
+	return wb
+}
+
 func (d *peerMsgHandler) process(en eraftpb.Entry, wb *engine_util.WriteBatch) *engine_util.WriteBatch {
 	if en.EntryType == eraftpb.EntryType_EntryConfChange {
 
@@ -147,12 +161,14 @@ func (d *peerMsgHandler) process(en eraftpb.Entry, wb *engine_util.WriteBatch) *
 	}
 	if msg.AdminRequest != nil {
 		//TODO: 处理管理命令
+		return d.processAdminRequest(en, msg, wb)
 	}
 
 	return wb
 
 }
 
+// 这里代表raftstore处理完消息，完成raft状态机转换之后并回复raft消息
 func (d *peerMsgHandler) HandleRaftReady() {
 	if d.stopped {
 		return
@@ -197,12 +213,16 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			wb.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
 			// kv值也保存到KvDB中
 			wb.WriteToDB(d.peerStorage.Engines.Kv)
+
+			d.ScheduleCompactLog(d.peerStorage.truncatedIndex())
+
 		}
 		// 5. 更新raft状态机
 		d.peer.RaftGroup.Advance(ready)
 	}
 }
 
+// 这里代表收到并发送给raftstore消息
 func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
 	switch msg.Type {
 	case message.MsgTypeRaftMessage:
@@ -285,7 +305,7 @@ func (d *peerMsgHandler) proposalNormalRequest(msg *raft_cmdpb.RaftCmdRequest, c
 			return
 		}
 	}
-	// 提交日志
+	// 序列化消息
 	msgBytes, err := msg.Marshal()
 	if err != nil {
 		// 这里为什么要求程序崩溃
@@ -305,6 +325,19 @@ func (d *peerMsgHandler) proposalNormalRequest(msg *raft_cmdpb.RaftCmdRequest, c
 	}
 }
 
+func (d *peerMsgHandler) proposalAdminRequest(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
+	req := msg.AdminRequest
+	switch req.CmdType {
+	case raft_cmdpb.AdminCmdType_CompactLog:
+		msgBytes, err := msg.Marshal()
+		if err != nil {
+			// 这里为什么要求程序崩溃
+			panic(err)
+		}
+		d.peer.RaftGroup.Propose(msgBytes)
+	}
+}
+
 func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
 	err := d.preProposeRaftCommand(msg)
 	if err != nil {
@@ -317,6 +350,7 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		d.proposalNormalRequest(msg, cb)
 	} else {
 		//TODO: 处理管理命令
+		d.proposalAdminRequest(msg, cb)
 	}
 
 }
