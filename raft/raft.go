@@ -208,7 +208,7 @@ func newRaft(c *Config) *Raft {
 		electionTimeout: c.ElectionTick,
 		config:          c,
 	}
-	r.RaftLog.applied = c.Applied
+	// r.RaftLog.applied = c.Applied
 	lastIndex := r.RaftLog.LastIndex()
 	r.Prs[r.id] = &Progress{
 		Match: lastIndex,
@@ -831,6 +831,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	}
 	r.becomeFollower(m.Term, m.From)
 	// 当前已提交，当前已应用，当前已经持久化的日志都和快照索引对齐
+	r.RaftLog.firstIndex = meta.Index + 1
 	r.RaftLog.committed = meta.Index
 	r.RaftLog.applied = meta.Index
 	r.RaftLog.stabled = meta.Index

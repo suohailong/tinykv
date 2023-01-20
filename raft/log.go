@@ -83,7 +83,7 @@ func newLog(storage Storage) *RaftLog {
 			panic(err)
 		}
 	}
-	fmt.Printf("newlog first: %d, last:%d, storage entries len: %d\n", first, last, len(entries))
+	fmt.Printf("newlog first: %d, last:%d, storage entries %d\n", first, last, entries)
 
 	return &RaftLog{
 		storage:    storage,
@@ -120,6 +120,7 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	if len(l.entries) > 0 {
 		start := l.applied - l.firstIndex + 1
+		fmt.Println(11111, l.applied, l.firstIndex)
 		end := min(l.committed-l.firstIndex+1, uint64(len(l.entries)))
 		return l.entries[start:end]
 	}
@@ -136,11 +137,15 @@ func (l *RaftLog) Entries(lo, hi uint64) []pb.Entry {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
+	var snapLast uint64
+	if !IsEmptySnap(l.pendingSnapshot) {
+		snapLast = l.pendingSnapshot.Metadata.Index
+	}
 	if len(l.entries) > 0 {
-		return l.entries[len(l.entries)-1].Index
+		return max(l.entries[len(l.entries)-1].Index, snapLast)
 	}
 	index, _ := l.storage.FirstIndex()
-	return index - 1
+	return max(index-1, snapLast)
 }
 func (l *RaftLog) RemoveAfter(index uint64) {
 	// 因为删除了日志，所以需要调整l.stable指针

@@ -269,5 +269,6 @@ func (ms *MemoryStorage) Append(entries []pb.Entry) error {
 		log.Panicf("missing log entry [last: %d, append at: %d]",
 			ms.lastIndex(), entries[0].Index)
 	}
+	// shortcut if there is no new entry.
 	return nil
 }
