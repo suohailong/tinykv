@@ -208,24 +208,36 @@ func (rn *RawNode) Ready() Ready {
 		"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
 		"finish get ready",
 	)
+
 	// 清理消息
 	rn.Raft.msgs = make([]pb.Message, 0)
+	// 判断快照是否为空
+	if !IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) {
+		rd.Snapshot = *rn.Raft.RaftLog.pendingSnapshot
+		rn.Raft.RaftLog.pendingSnapshot = nil
+	}
+
 	return rd
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
-
+	// hardState是否改变
 	if rn.preHardState.Commit != rn.Raft.RaftLog.committed ||
 		rn.preHardState.Vote != rn.Raft.Vote ||
 		rn.preHardState.Term != rn.Raft.Term {
 		return true
 	}
 
+	// 消息是否改变
 	if len(rn.Raft.msgs) > 0 ||
 		len(rn.Raft.RaftLog.nextEnts()) > 0 ||
 		len(rn.Raft.RaftLog.unstableEntries()) > 0 {
+		return true
+	}
+	// !是否有快照产生
+	if !IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) {
 		return true
 	}
 
@@ -247,6 +259,8 @@ func (rn *RawNode) Advance(rd Ready) {
 	if !(rd.HardState.Commit == 0 && rd.HardState.Vote == 0 && rd.HardState.Term == 0) {
 		rn.preHardState = rd.HardState
 	}
+	// TODO: 压缩内存日志
+
 }
 
 // GetProgress return the Progress of this node and its peers, if this

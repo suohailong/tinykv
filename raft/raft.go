@@ -388,6 +388,7 @@ func (r *Raft) setpFollower(m pb.Message) error {
 		r.handleRequestVote(m)
 	case pb.MessageType_MsgPropose:
 	case pb.MessageType_MsgSnapshot:
+		r.handleSnapshot(m)
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
 	}
@@ -415,6 +416,7 @@ func (r *Raft) setpCandidate(m pb.Message) error {
 		//fmt.Printf("%d 收到 %d 投票 : %v\n", r.id, m.From, !m.Reject)
 	case pb.MessageType_MsgPropose:
 	case pb.MessageType_MsgSnapshot:
+		r.handleSnapshot(m)
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
 	}
@@ -456,6 +458,7 @@ func (r *Raft) setpLeader(m pb.Message) error {
 		r.bcastAppend()
 		r.commit()
 	case pb.MessageType_MsgSnapshot:
+		//FIXME: leader 也需要处理快照?
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
 	}
@@ -511,6 +514,23 @@ func (r *Raft) sendAppendResponse(to uint64, reject bool) {
 	})
 }
 
+func (r *Raft) sendSnapshot(to uint64) {
+	// 生成快照
+	snap, err := r.RaftLog.storage.Snapshot()
+	if err != nil {
+		return
+	}
+	// 如果有快照，发送快照
+	r.msgs = append(r.msgs, pb.Message{
+		MsgType:  pb.MessageType_MsgSnapshot,
+		From:     r.id,
+		To:       to,
+		Term:     r.Term,
+		Snapshot: &snap,
+	})
+
+}
+
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
@@ -525,6 +545,12 @@ func (r *Raft) sendAppend(to uint64) bool {
 	// TODO: 这里没有做完
 	peerTerm, err := r.RaftLog.Term(peerIndex)
 	if err != nil {
+		// 如果发现其他节点的日志在本机已经被compact,则发送快照
+		if err == ErrCompacted {
+			// 发送生成快照的命令
+			r.sendSnapshot(to)
+		}
+
 		return false
 	}
 
@@ -800,6 +826,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	if m.Term < r.Term || meta.Index <= r.RaftLog.committed {
 		// 消息中任期小说明leader过期
 		// 日志小于当前follower已提交日志说明, 说明leader的日志不是最新的,等待后续日志对齐
+		r.sendAppendResponse(m.From, false)
 		return
 	}
 	r.becomeFollower(m.Term, m.From)
@@ -817,7 +844,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	for _, id := range meta.ConfState.Nodes {
 		r.Prs[id] = &Progress{}
 	}
-
+	r.sendAppendResponse(m.From, true)
 }
 
 // addNode add a new node to raft group

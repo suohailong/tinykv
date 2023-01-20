@@ -224,8 +224,10 @@ func (m *RaftLocalState) GetLastTerm() uint64 {
 type RaftApplyState struct {
 	// Record the applied index of the state machine to make sure
 	// not apply any index twice after restart.
+
 	AppliedIndex uint64 `protobuf:"varint,1,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
 	// Record the index and term of the last raft log that have been truncated. (Used in 2C)
+	// 记录raft log中被删掉的最日志中最后一条的index和term
 	TruncatedState       *RaftTruncatedState `protobuf:"bytes,2,opt,name=truncated_state,json=truncatedState" json:"truncated_state,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
 	XXX_unrecognized     []byte              `json:"-"`

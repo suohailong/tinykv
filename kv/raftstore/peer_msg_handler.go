@@ -109,7 +109,15 @@ func (d *peerMsgHandler) processNormalRequest(en eraftpb.Entry, msg *raft_cmdpb.
 						},
 					}
 				case raft_cmdpb.CmdType_Snap:
-					// TODO: 处理快照
+					// FIXME: regionEpoch是用来干啥的
+					if msg.Header.RegionEpoch.Version != d.Region().RegionEpoch.Version {
+						p.cb.Done(ErrResp(&util.ErrEpochNotMatch{}))
+						return wb
+					}
+					d.peerStorage.applyState.AppliedIndex = en.Index
+					wb.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
+					wb.WriteToDB(d.ctx.engine.Kv)
+					wb = &engine_util.WriteBatch{}
 					resp.Responses = []*raft_cmdpb.Response{
 						{
 							CmdType: raft_cmdpb.CmdType_Snap,
@@ -214,6 +222,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			// kv值也保存到KvDB中
 			wb.WriteToDB(d.peerStorage.Engines.Kv)
 
+			// 启动logGc任务
 			d.ScheduleCompactLog(d.peerStorage.truncatedIndex())
 
 		}

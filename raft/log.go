@@ -155,15 +155,24 @@ func (l *RaftLog) RemoveAfter(index uint64) {
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
+	// 如果当前日志在缓存中则返回缓存中的数据
 	if len(l.entries) > 0 && i >= l.firstIndex {
 		if i > l.LastIndex() {
 			return 0, errors.New("ErrUnavailable")
 		}
 		return l.entries[i-l.firstIndex].Term, nil
 	}
+	// 如果不再缓存中，则查找持久化的数据
 	term, err := l.storage.Term(i)
-	if err != nil {
-		return 0, errors.New("storageTermErr")
+	if err == ErrUnavailable && !IsEmptySnap(l.pendingSnapshot) {
+		// 如果在当前正在应用的快照中找到了当前日志，则返回相应的任期
+		if i == l.pendingSnapshot.Metadata.Index {
+			return l.pendingSnapshot.Metadata.Term, nil
+		}
+		// 如果当前日志比正在应用的快照日志还小，说明已经被compack了
+		if i < l.pendingSnapshot.Metadata.Index {
+			return term, ErrCompacted
+		}
 	}
 	return term, nil
 }
