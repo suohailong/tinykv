@@ -1603,8 +1603,8 @@ func (nw *network) send(msgs ...pb.Message) {
 	for len(msgs) > 0 {
 		m := msgs[0]
 		p := nw.peers[m.To]
+		// fmt.Printf("store [%d] send msg: %v to %d\n", m.From, m, m.To)
 		p.Step(m)
-		//fmt.Printf("%d 发送消息: %v  给 %d\n", m.From, m.GetMsgType(), m.To)
 		msgs = append(msgs[1:], nw.filter(p.readMessages())...)
 	}
 }

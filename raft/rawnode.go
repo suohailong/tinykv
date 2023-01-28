@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -117,6 +116,7 @@ func (rn *RawNode) Propose(data []byte) error {
 }
 
 // ProposeConfChange proposes a config change.
+//
 func (rn *RawNode) ProposeConfChange(cc pb.ConfChange) error {
 	data, err := cc.Marshal()
 	if err != nil {
@@ -161,12 +161,12 @@ func (rn *RawNode) Step(m pb.Message) error {
 func (rn *RawNode) Ready() Ready {
 	// Your Code Here (2A).
 
-	fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
-		"term:", rn.Raft.Term,
-		"leader:", rn.Raft.Lead, "current entris len:", len(rn.Raft.RaftLog.entries),
-		"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
-		"get ready",
-	)
+	// fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
+	// 	"term:", rn.Raft.Term,
+	// 	"leader:", rn.Raft.Lead, "current entris len:", len(rn.Raft.RaftLog.entries),
+	// 	"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
+	// 	"get ready",
+	// )
 	// 读取需要需要持久化的日志
 	unStableEntries := rn.Raft.RaftLog.unstableEntries()
 	committedEntries := rn.Raft.RaftLog.nextEnts()
@@ -202,12 +202,12 @@ func (rn *RawNode) Ready() Ready {
 	if !reflect.DeepEqual(rn.preHardState, hardState) {
 		rd.HardState = hardState
 	}
-	fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
-		"term:", rn.Raft.Term,
-		"leader:", rn.Raft.Lead,
-		"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
-		"finish get ready",
-	)
+	// fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
+	// 	"term:", rn.Raft.Term,
+	// 	"leader:", rn.Raft.Lead,
+	// 	"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
+	// 	"finish get ready",
+	// )
 
 	// 清理消息
 	rn.Raft.msgs = make([]pb.Message, 0)

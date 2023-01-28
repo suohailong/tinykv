@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -68,7 +67,6 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-
 	hardState, _, err := storage.InitialState()
 	if err != nil {
 		panic(err)
@@ -83,7 +81,6 @@ func newLog(storage Storage) *RaftLog {
 			panic(err)
 		}
 	}
-	fmt.Printf("newlog first: %d, last:%d, storage entries %d\n", first, last, entries)
 
 	return &RaftLog{
 		storage:    storage,
@@ -109,7 +106,6 @@ func (l *RaftLog) maybeCompact() {
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
 	if len(l.entries) > 0 && l.stabled+1 >= l.firstIndex {
-		// fmt.Printlnl.stabled-l.firstIndex+1, l.stabled, l.firstIndex, len(l.entries))
 		return l.entries[l.stabled-l.firstIndex+1:]
 	}
 	return nil
@@ -120,7 +116,6 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	if len(l.entries) > 0 {
 		start := l.applied - l.firstIndex + 1
-		fmt.Println(11111, l.applied, l.firstIndex)
 		end := min(l.committed-l.firstIndex+1, uint64(len(l.entries)))
 		return l.entries[start:end]
 	}

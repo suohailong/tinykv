@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"math/rand"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -228,6 +227,7 @@ func newRaft(c *Config) *Raft {
 			}
 		}
 	}
+	// fmt.Printf("new raft machine: [%d]\n", r.id)
 	return r
 }
 
@@ -351,10 +351,10 @@ func (r *Raft) appendEntries(entries ...*pb.Entry) {
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
-	fmt.Println("store:", "[", r.id, "]", "recive msgs:", m, "state:", r.State.String(), "leader:",
-		"term:", r.Term,
-		"raftlog:", "{", r.RaftLog.stabled, r.RaftLog.committed, r.RaftLog.applied, r.RaftLog.firstIndex, "}",
-		r.Lead, "current entris len:", len(r.RaftLog.entries))
+	// fmt.Println("store:", "[", r.id, "]", "recive msgs:", m, "state:", r.State.String(), "leader:",
+	// 	"term:", r.Term,
+	// 	"raftlog:", "{", r.RaftLog.stabled, r.RaftLog.committed, r.RaftLog.applied, r.RaftLog.firstIndex, "}",
+	// 	r.Lead, "current entris len:", len(r.RaftLog.entries))
 	switch r.State {
 	case StateFollower:
 		return r.setpFollower(m)
@@ -378,19 +378,18 @@ func (r *Raft) setpFollower(m pb.Message) error {
 		r.handleHeartbeat(m)
 	// 表示选举超时
 	case pb.MessageType_MsgHup:
-		r.becomeCandidate()
-		// 广播发送投票请求
-		r.bcastVoteRequest()
-		//fmt.Printf("%d 邀请%v投票\n", r.id, r.Prs)
+		r.campaign()
 	// 跟随者接收到投票请求
 	case pb.MessageType_MsgRequestVote:
 		//fmt.Printf("%d 收到投票请求: 投给 %d\n", r.id, m.From)
 		r.handleRequestVote(m)
-	case pb.MessageType_MsgPropose:
 	case pb.MessageType_MsgSnapshot:
 		r.handleSnapshot(m)
 	case pb.MessageType_MsgTimeoutNow:
+		// 1. 立即发起选举
+		r.campaign()
 	case pb.MessageType_MsgTransferLeader:
+		r.handleTransferLeader(m)
 	}
 	return nil
 }
@@ -400,10 +399,7 @@ func (r *Raft) setpCandidate(m pb.Message) error {
 	switch m.GetMsgType() {
 	// 候选人选举超时
 	case pb.MessageType_MsgHup:
-		//TODO: 这里为什么还需要再次转换一下角色
-		r.becomeCandidate()
-		// 发送投票信息
-		r.bcastVoteRequest()
+		r.campaign()
 	// 候选人接收到追加日志请求
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
@@ -414,11 +410,10 @@ func (r *Raft) setpCandidate(m pb.Message) error {
 	case pb.MessageType_MsgRequestVoteResponse:
 		r.handleVoteResponse(m)
 		//fmt.Printf("%d 收到 %d 投票 : %v\n", r.id, m.From, !m.Reject)
-	case pb.MessageType_MsgPropose:
 	case pb.MessageType_MsgSnapshot:
 		r.handleSnapshot(m)
-	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
+		r.handleTransferLeader(m)
 	}
 	return nil
 }
@@ -461,6 +456,15 @@ func (r *Raft) setpLeader(m pb.Message) error {
 		//FIXME: leader 也需要处理快照?
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
+		// TODO:
+		/*
+			1. 检查下继任者的任职资格，包括但不限于日志是否最新
+			2. 如果任职资格不合格， 比如日志不是最新，当前领导者应发布message Append消息同步日志给继任者
+			   并且禁止接收新的proposals
+			3. 继任者任职资格合格， 发送MsgTimeoutNow
+		*/
+		r.handleTransferLeader(m)
+
 	}
 	return nil
 }
@@ -623,6 +627,13 @@ func (r *Raft) bcastAppend() {
 		}
 	}
 }
+func (r *Raft) sendTimeNow(to uint64) {
+	r.msgs = append(r.msgs, pb.Message{
+		MsgType: pb.MessageType_MsgTimeoutNow,
+		From:    r.id,
+		To:      to,
+	})
+}
 
 func (r *Raft) bcastHertBeat() {
 	for id := range r.Prs {
@@ -741,7 +752,46 @@ func (r *Raft) handleAppendResponse(m pb.Message) {
 		}
 	}
 	r.commit()
-	//TODO
+	//如果正在转移领导权，补全完日志后发送sendtimenow立即开始选举
+	if m.From == r.leadTransferee && m.Index == r.RaftLog.LastIndex() {
+		r.sendTimeNow(m.From)
+	}
+}
+
+func (r *Raft) handleTransferLeader(m pb.Message) {
+	leadTransferee := m.From
+	lastLeadTransferee := r.leadTransferee
+	if r.State != StateLeader {
+		// 如果是follower， 转发信息到leader
+		if r.Lead != None {
+			m.To = r.Lead
+			r.msgs = append(r.msgs, m)
+		}
+	}
+	// 判断自己是否是leader
+	if r.Lead != r.id {
+		// 不是leader 直接忽略
+		return
+	}
+	if lastLeadTransferee != None {
+		if leadTransferee == r.id || lastLeadTransferee == leadTransferee {
+			// 如果本次转移的目标是自己或者转移目标没变,则直接忽略
+			return
+		}
+	}
+	if _, ok := r.Prs[leadTransferee]; !ok {
+		// 节点不存在不转移
+		return
+	}
+	r.leadTransferee = leadTransferee
+	if r.Prs[leadTransferee].Match == r.RaftLog.LastIndex() {
+		// 如果本次转移日志是最新的
+		r.sendTimeNow(leadTransferee)
+
+	} else {
+		// 发送append
+		r.sendAppend(leadTransferee)
+	}
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -817,7 +867,11 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 	r.sendHertbeatResponse(m.From, VOTE_APPROVE)
 }
 
-// TODO: 本期不实现
+func (r *Raft) campaign() {
+	r.becomeCandidate()
+	r.bcastVoteRequest()
+}
+
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
@@ -851,9 +905,21 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 // addNode add a new node to raft group
 func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
+	r.Prs[id] = &Progress{
+		Match: 0,
+		Next:  1,
+	}
+	r.PendingConfIndex = None
 }
 
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+	delete(r.Prs, id)
+	if r.State == StateLeader {
+		// 如果是leader 则先提交日志
+		r.commit()
+	}
+	r.PendingConfIndex = None
+
 }
