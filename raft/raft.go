@@ -336,7 +336,10 @@ func (r *Raft) appendEntries(entries ...*pb.Entry) {
 	for _, e := range entries {
 		// TODO: 这里先不管
 		if e.EntryType == pb.EntryType_EntryConfChange {
-
+			if r.PendingConfIndex != None {
+				return
+			}
+			r.PendingConfIndex = e.Index
 		}
 		ents = append(ents, *e)
 	}

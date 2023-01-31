@@ -44,6 +44,7 @@ func (r *splitCheckHandler) Handle(t worker.Task) {
 	regionId := region.Id
 	log.Debugf("executing split check worker.Task: [regionId: %d, startKey: %s, endKey: %s]", regionId,
 		hex.EncodeToString(region.StartKey), hex.EncodeToString(region.EndKey))
+	// 找到一个待分裂的键
 	key := r.splitCheck(regionId, region.StartKey, region.EndKey)
 	if key != nil {
 		_, userKey, err := codec.DecodeBytes(key)
@@ -52,6 +53,7 @@ func (r *splitCheckHandler) Handle(t worker.Task) {
 			// To make sure the keys of same user key locate in one Region, decode and then encode to truncate the timestamp
 			key = codec.EncodeBytes(userKey)
 		}
+		// 发送页分裂消息
 		msg := message.Msg{
 			Type:     message.MsgTypeSplitRegion,
 			RegionID: regionId,
