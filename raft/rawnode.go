@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -177,6 +178,7 @@ func (rn *RawNode) Ready() Ready {
 	}
 	if len(rn.Raft.msgs) > 0 {
 		rd.Messages = rn.Raft.msgs
+		fmt.Printf("(ready) store: %d, send msg: [%v]\n", rn.Raft.id, rd.Messages)
 	}
 
 	if rn.preSoftState.Lead != rn.Raft.Lead ||

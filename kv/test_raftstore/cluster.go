@@ -99,6 +99,7 @@ func (c *Cluster) Start() {
 		RegionEpoch: regionEpoch,
 	}
 
+	// 初始化store
 	for storeID, engine := range c.engines {
 		peer := NewPeer(storeID, storeID)
 		firstRegion.Peers = append(firstRegion.Peers, peer)

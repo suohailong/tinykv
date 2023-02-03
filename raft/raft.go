@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -266,7 +267,6 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.voteCount = 0
 	r.denialCount = 0
 
-	//TODO ???:这个值有疑问
 	r.leadTransferee = 0
 	// 复位超时
 	r.electionElapsed = 0
@@ -283,7 +283,7 @@ func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.Vote = r.id
 	r.Term++
-	//TODO ???: 这个还有必要吗，有了voteCount
+	//FIXME ???: 这个还有必要吗，有了voteCount
 	r.votes = make(map[uint64]bool)
 	// 投了自己一票
 	r.votes[r.id] = true
@@ -354,6 +354,7 @@ func (r *Raft) appendEntries(entries ...*pb.Entry) {
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
+	fmt.Printf("store: %d, status: %v, recive msg: [%v]\n", r.id, r.State.String(), m)
 	// fmt.Println("store:", "[", r.id, "]", "recive msgs:", m, "state:", r.State.String(), "leader:",
 	// 	"term:", r.Term,
 	// 	"raftlog:", "{", r.RaftLog.stabled, r.RaftLog.committed, r.RaftLog.applied, r.RaftLog.firstIndex, "}",
@@ -459,7 +460,6 @@ func (r *Raft) setpLeader(m pb.Message) error {
 		//FIXME: leader 也需要处理快照?
 	case pb.MessageType_MsgTimeoutNow:
 	case pb.MessageType_MsgTransferLeader:
-		// TODO:
 		/*
 			1. 检查下继任者的任职资格，包括但不限于日志是否最新
 			2. 如果任职资格不合格， 比如日志不是最新，当前领导者应发布message Append消息同步日志给继任者
@@ -491,7 +491,6 @@ func (r *Raft) commit() {
 			commitUpdated = true
 		}
 	}
-	// TODO
 	if commitUpdated {
 		r.bcastAppend()
 	}
@@ -549,7 +548,6 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return true
 	}
 
-	// TODO: 这里没有做完
 	peerTerm, err := r.RaftLog.Term(peerIndex)
 	if err != nil {
 		// 如果发现其他节点的日志在本机已经被compact,则发送快照
@@ -580,7 +578,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 		LogTerm: peerTerm,
 		Index:   peerIndex,
 		Entries: sendEntries,
-		// TODO: 这块不理解
+		// FIXME: 这块不理解
 		Commit: r.RaftLog.committed,
 	})
 	return false
@@ -602,9 +600,8 @@ func (r *Raft) sendRequestVoteResponse(to uint64, reject bool) {
 		MsgType: pb.MessageType_MsgRequestVoteResponse,
 		From:    r.id,
 		To:      to,
-		//TODO ??
-		Term:   r.Term,
-		Reject: reject,
+		Term:    r.Term,
+		Reject:  reject,
 	})
 }
 
@@ -668,7 +665,7 @@ func (r *Raft) bcastVoteRequest() {
 func (r *Raft) handleVoteResponse(m pb.Message) {
 	if m.GetTerm() > r.Term {
 		r.becomeFollower(m.GetTerm(), None)
-		// TODO: 这里为什么要设置成对端的id, 这里就直接给对端投票了？
+		// FIXME: 这里为什么要设置成对端的id, 这里就直接给对端投票了？
 		r.Vote = m.From
 		return
 	}
@@ -722,7 +719,7 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 		return
 	}
 
-	// TODO: 这里为什么能是fllower在日志小于对方的时候才能投赞成票，为什么candidate不行
+	// FIXME: 这里为什么能是fllower在日志小于对方的时候才能投赞成票，为什么candidate不行
 	// 任期相同比较日志, 只适用于fllower
 	if r.State == StateFollower &&
 		r.Vote == None &&
@@ -862,7 +859,6 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 		return
 	}
 
-	// TODO: ????
 	if m.Commit > r.RaftLog.committed {
 		r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
 	}

@@ -51,6 +51,7 @@ func (rw *raftWorker) run(closeCh <-chan struct{}, wg *sync.WaitGroup) {
 			if peerState == nil {
 				continue
 			}
+			// fmt.Printf("store: %v, recive trans msg: %v\n", peerState.peer.storeID(), msg.Data)
 			newPeerMsgHandler(peerState.peer, rw.ctx).HandleMsg(msg)
 		}
 		for _, peerState := range peerStateMap {

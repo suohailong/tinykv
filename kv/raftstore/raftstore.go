@@ -255,7 +255,6 @@ func (bs *Raftstore) start(
 	}
 
 	for _, peer := range regionPeers {
-		// fmt.Println("start peer: ", i, peer.regionId, peer.Meta.GetId(), peer.Meta.GetStoreId())
 		bs.router.register(peer)
 	}
 	bs.startWorkers(regionPeers)
@@ -267,6 +266,7 @@ func (bs *Raftstore) startWorkers(peers []*peer) {
 	workers := bs.workers
 	router := bs.router
 	bs.wg.Add(2) // raftWorker, storeWorker
+	// 用来处理raft 命令及信息的处理
 	rw := newRaftWorker(ctx, router)
 	go rw.run(bs.closeCh, bs.wg)
 	sw := newStoreWorker(ctx, bs.storeState)
@@ -278,8 +278,11 @@ func (bs *Raftstore) startWorkers(peers []*peer) {
 	}
 	engines := ctx.engine
 	cfg := ctx.cfg
+	// 检测region分区的任务
 	workers.splitCheckWorker.Start(runner.NewSplitCheckHandler(engines.Kv, NewRaftstoreRouter(router), cfg))
+	//
 	workers.regionWorker.Start(runner.NewRegionTaskHandler(engines, ctx.snapMgr))
+	// 日志清理的worker
 	workers.raftLogGCWorker.Start(runner.NewRaftLogGCTaskHandler())
 	workers.schedulerWorker.Start(runner.NewSchedulerTaskHandler(ctx.store.Id, ctx.schedulerClient, NewRaftstoreRouter(router)))
 	go bs.tickDriver.run()

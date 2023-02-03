@@ -138,6 +138,7 @@ type NodeSimulator struct {
 func NewNodeSimulator(schedulerClient scheduler_client.Client) *NodeSimulator {
 	trans := NewMockTransport()
 	return &NodeSimulator{
+		// 代表node的网络
 		trans:           trans,
 		schedulerClient: schedulerClient,
 		nodes:           make(map[uint64]*raftstore.Node),

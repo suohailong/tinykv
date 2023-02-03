@@ -63,6 +63,7 @@ func (pr *router) send(regionID uint64, msg message.Msg) error {
 	if p == nil || atomic.LoadUint32(&p.closed) == 1 {
 		return errPeerNotFound
 	}
+	// 传递给了peer_msg_handler
 	pr.peerSender <- msg
 	return nil
 }
