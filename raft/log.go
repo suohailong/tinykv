@@ -125,7 +125,10 @@ func (l *RaftLog) Entries(lo, hi uint64) []pb.Entry {
 	if lo >= l.firstIndex && hi-l.firstIndex <= uint64(len(l.entries)) {
 		return l.entries[lo-l.firstIndex : hi-l.firstIndex]
 	}
-	ents, _ := l.storage.Entries(lo, hi)
+	ents, err := l.storage.Entries(lo, hi)
+	if err != nil {
+		// log.Errorf("get logs from storage err: %v, [lo: %d, hi: %d]", err, lo, hi)
+	}
 	return ents
 }
 
@@ -174,5 +177,5 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 			return term, ErrCompacted
 		}
 	}
-	return term, nil
+	return term, err
 }

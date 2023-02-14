@@ -3,7 +3,6 @@ package test_raftstore
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -184,6 +183,8 @@ func (c *Cluster) AllocPeer(storeID uint64) *metapb.Peer {
 
 func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.Duration) (*raft_cmdpb.RaftCmdResponse, *badger.Txn) {
 	startTime := time.Now()
+	region := c.GetRegion(key)
+	log.Infof("client request region: %v, key: %s, cmd: %v start\n", region, string(key), reqs[0])
 	for i := 0; i < 10 || time.Since(startTime) < timeout; i++ {
 		region := c.GetRegion(key)
 		regionID := region.GetId()
@@ -198,6 +199,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 			SleepMS(100)
 			continue
 		}
+		log.Infof("client request region: %v, key: %s, cmd: %v complete\n", region, string(key), reqs[0])
 		return resp, txn
 	}
 	panic("request timeout")
@@ -275,7 +277,7 @@ func (c *Cluster) GetRegion(key []byte) *metapb.Region {
 		// retry to get the region again.
 		SleepMS(20)
 	}
-	panic(fmt.Sprintf("find no region for %s", hex.EncodeToString(key)))
+	panic(fmt.Sprintf("find no region for %s", string(key)))
 }
 
 func (c *Cluster) GetRandomRegion() *metapb.Region {
@@ -303,7 +305,7 @@ func (c *Cluster) MustPutCF(cf string, key, value []byte) {
 	req := NewPutCfCmd(cf, key, value)
 	resp, _ := c.Request(key, []*raft_cmdpb.Request{req}, 5*time.Second)
 	if resp.Header.Error != nil {
-		panic(resp.Header.Error)
+		panic("1111" + resp.Header.Error.String())
 	}
 	if len(resp.Responses) != 1 {
 		panic("len(resp.Responses) != 1")
@@ -328,7 +330,7 @@ func (c *Cluster) GetCF(cf string, key []byte) []byte {
 	req := NewGetCfCmd(cf, key)
 	resp, _ := c.Request(key, []*raft_cmdpb.Request{req}, 5*time.Second)
 	if resp.Header.Error != nil {
-		panic(resp.Header.Error)
+		panic("get" + resp.Header.Error.String())
 	}
 	if len(resp.Responses) != 1 {
 		panic("len(resp.Responses) != 1")
@@ -347,7 +349,7 @@ func (c *Cluster) MustDeleteCF(cf string, key []byte) {
 	req := NewDeleteCfCmd(cf, key)
 	resp, _ := c.Request(key, []*raft_cmdpb.Request{req}, 5*time.Second)
 	if resp.Header.Error != nil {
-		panic(resp.Header.Error)
+		panic("delete" + resp.Header.Error.String())
 	}
 	if len(resp.Responses) != 1 {
 		panic("len(resp.Responses) != 1")
@@ -362,9 +364,9 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 	values := make([][]byte, 0)
 	key := start
 	for (len(end) != 0 && bytes.Compare(key, end) < 0) || (len(key) == 0 && len(end) == 0) {
-		resp, txn := c.Request(key, []*raft_cmdpb.Request{req}, 5*time.Second)
+		resp, txn := c.Request(key, []*raft_cmdpb.Request{req}, 20*time.Second)
 		if resp.Header.Error != nil {
-			panic(resp.Header.Error)
+			panic("san1111" + resp.Header.Error.String())
 		}
 		if len(resp.Responses) != 1 {
 			panic("len(resp.Responses) != 1")
@@ -374,6 +376,8 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 		}
 		region := resp.Responses[0].GetSnap().Region
 		iter := raft_storage.NewRegionReader(txn, *region).IterCF(engine_util.CfDefault)
+		// fmt.Println("seek key:", string(key), "region: ", region)
+		//FIXME: 遇到region分裂时，这里可能读取失败，因为key可能不存在于原始的region了
 		for iter.Seek(key); iter.Valid(); iter.Next() {
 			if engine_util.ExceedEndKey(iter.Item().Key(), end) {
 				break

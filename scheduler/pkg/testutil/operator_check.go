@@ -14,6 +14,8 @@
 package testutil
 
 import (
+	"fmt"
+
 	"github.com/pingcap-incubator/tinykv/scheduler/server/schedule/operator"
 	check "github.com/pingcap/check"
 )
@@ -49,6 +51,7 @@ func CheckTransferLeader(c *check.C, op *operator.Operator, kind operator.OpKind
 
 // CheckTransferPeer checks if the operator is to transfer peer between the specified source and target stores.
 func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	fmt.Println("op >", op.Len(), ":", op.Step(0), "|", op.Step(1), "|", op.Step(2))
 	c.Assert(op, check.NotNil)
 	if op.Len() == 2 {
 		c.Assert(op.Step(0).(operator.AddPeer).ToStore, check.Equals, targetID)
@@ -61,6 +64,7 @@ func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, 
 		kind |= operator.OpLeader
 	}
 	kind |= operator.OpRegion
+	fmt.Println("op kind: ", kind)
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
 

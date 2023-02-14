@@ -168,6 +168,7 @@ func doSnapshot(engines *engine_util.Engines, mgr *snap.SnapManager, regionId ui
 
 	index, term, err := getAppliedIdxTermForSnapshot(engines.Raft, txn, regionId)
 	if err != nil {
+		log.Errorf("getAppliedIdxTermForSnapshot err: %v", err)
 		return nil, err
 	}
 
@@ -195,6 +196,7 @@ func doSnapshot(engines *engine_util.Engines, mgr *snap.SnapManager, regionId ui
 	}
 	s, err := mgr.GetSnapshotForBuilding(key)
 	if err != nil {
+		log.Errorf("mgr.GetSnapshotForBuilding err: %v", err)
 		return nil, err
 	}
 	// Set snapshot data
@@ -202,6 +204,7 @@ func doSnapshot(engines *engine_util.Engines, mgr *snap.SnapManager, regionId ui
 	snapshotStatics := snap.SnapStatistics{}
 	err = s.Build(txn, region, snapshotData, &snapshotStatics, mgr)
 	if err != nil {
+		log.Errorf("s.Build err: %v", err)
 		return nil, err
 	}
 	snapshot.Data, err = snapshotData.Marshal()

@@ -122,6 +122,7 @@ func (ps *PeerStorage) Entries(low, high uint64) ([]eraftpb.Entry, error) {
 	if len(buf) == int(high-low) {
 		return buf, nil
 	}
+	fmt.Println("哈哈哈哈哈哈", raft.ErrUnavailable)
 	// Here means we don't fetch enough entries.
 	return nil, raft.ErrUnavailable
 }

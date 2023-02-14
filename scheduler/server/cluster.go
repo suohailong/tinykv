@@ -276,9 +276,35 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *schedulerpb.StoreStats) error 
 	return nil
 }
 
-// processRegionHeartbeat updates the region information.
+// processRegionHeartbeat updates the scheduler local region information .
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Your Code Here (3C).
+	regionEpoch := region.GetRegionEpoch()
+	if regionEpoch == nil {
+		return errors.Errorf("region %d epoch is nil", region.GetID())
+	}
+	staleRegion := c.GetRegion(region.GetID())
+	if staleRegion != nil {
+		if regionEpoch.GetVersion() < staleRegion.GetRegionEpoch().GetVersion() || regionEpoch.GetConfVer() < staleRegion.GetRegionEpoch().GetConfVer() {
+			//更新region到本地region树
+			return ErrRegionIsStale(region.GetMeta(), staleRegion.GetMeta())
+		}
+	} else {
+		//找到一个覆盖了当前region的region
+		originRegions := c.ScanRegions(region.GetStartKey(), region.GetEndKey(), 0)
+		for _, r := range originRegions {
+			e := r.GetRegionEpoch()
+			if e.GetVersion() < r.GetRegionEpoch().GetConfVer() || e.GetConfVer() < r.GetRegionEpoch().GetConfVer() {
+				//更新region到本地region树
+				return ErrRegionIsStale(region.GetMeta(), staleRegion.GetMeta())
+			}
+		}
+	}
+	c.putRegion(region)
+	//更新当前region 所有store的状态
+	for id := range region.GetStoreIds() {
+		c.updateStoreStatusLocked(id)
+	}
 
 	return nil
 }

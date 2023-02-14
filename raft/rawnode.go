@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -161,13 +160,6 @@ func (rn *RawNode) Step(m pb.Message) error {
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
 	// Your Code Here (2A).
-
-	// fmt.Println("store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
-	// 	"term:", rn.Raft.Term,
-	// 	"leader:", rn.Raft.Lead, "current entris len:", len(rn.Raft.RaftLog.entries),
-	// 	"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
-	// 	"get ready",
-	// )
 	// 读取需要需要持久化的日志
 	unStableEntries := rn.Raft.RaftLog.unstableEntries()
 	committedEntries := rn.Raft.RaftLog.nextEnts()
@@ -178,7 +170,6 @@ func (rn *RawNode) Ready() Ready {
 	}
 	if len(rn.Raft.msgs) > 0 {
 		rd.Messages = rn.Raft.msgs
-		// fmt.Printf("(ready) store: %d, send msg: [%v]\n", rn.Raft.id, rd.Messages)
 	}
 
 	if rn.preSoftState.Lead != rn.Raft.Lead ||
@@ -188,14 +179,6 @@ func (rn *RawNode) Ready() Ready {
 		rd.SoftState = rn.preSoftState
 	}
 
-	// softState := &SoftState{
-	// 	Lead:      rn.Raft.Lead,
-	// 	RaftState: rn.Raft.State,
-	// }
-	// if *rn.preReady.SoftState != *softState {
-	// 	rd.SoftState = softState
-	// }
-
 	hardState := pb.HardState{
 		Term:   rn.Raft.Term,
 		Vote:   rn.Raft.Vote,
@@ -204,12 +187,12 @@ func (rn *RawNode) Ready() Ready {
 	if !reflect.DeepEqual(rn.preHardState, hardState) {
 		rd.HardState = hardState
 	}
-	fmt.Println("(ready)store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
-		"term:", rn.Raft.Term,
-		"leader:", rn.Raft.Lead,
-		"raftlog:", "{", rn.Raft.RaftLog.stabled, rn.Raft.RaftLog.committed, rn.Raft.RaftLog.applied, rn.Raft.RaftLog.firstIndex, "}",
-		"finish get ready",
-	)
+	// fmt.Println("(ready)store:", "[", rn.Raft.id, "]", "send msgs:", rn.Raft.msgs, "state:", rn.Raft.State.String(),
+	// 	"term:", rn.Raft.Term,
+	// 	"leader:", rn.Raft.Lead,
+	// 	"raftlog:", "{", "stableIndex:", rn.Raft.RaftLog.stabled, "commitIndex:", rn.Raft.RaftLog.committed, "applyIndex:", rn.Raft.RaftLog.applied, "firstIndex:", rn.Raft.RaftLog.firstIndex, "}",
+	// 	"needCommit:", committedEntries,
+	// )
 
 	// 清理消息
 	rn.Raft.msgs = make([]pb.Message, 0)

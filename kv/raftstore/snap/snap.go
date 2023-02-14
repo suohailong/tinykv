@@ -393,6 +393,7 @@ func (s *Snap) readSnapshotMeta() (*rspb.SnapshotMeta, error) {
 	}
 	file, err := os.Open(s.MetaFile.Path)
 	if err != nil {
+		fmt.Println("这里吧", s.MetaFile.Path)
 		return nil, errors.WithStack(err)
 	}
 	size := fi.Size()

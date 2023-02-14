@@ -34,10 +34,13 @@ type Scheduler interface {
 	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
 	GetType() string
 	EncodeConfig() ([]byte, error)
+	// 获取调度器运行的定时间隔
 	GetMinInterval() time.Duration
+	// minInterval返回为空时，调用此函数增加定时间隔
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster opt.Cluster) error
 	Cleanup(cluster opt.Cluster)
+
 	Schedule(cluster opt.Cluster) *operator.Operator
 	IsScheduleAllowed(cluster opt.Cluster) bool
 }

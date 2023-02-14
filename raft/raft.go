@@ -16,9 +16,9 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"math/rand"
 
+	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -354,7 +354,6 @@ func (r *Raft) appendEntries(entries ...*pb.Entry) {
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
-	fmt.Printf("store: %d, status: %v, recive msg: [%v]\n", r.id, r.State.String(), m)
 	// fmt.Println("store:", "[", r.id, "]", "recive msgs:", m, "state:", r.State.String(), "leader:",
 	// 	"term:", r.Term,
 	// 	"raftlog:", "{", r.RaftLog.stabled, r.RaftLog.committed, r.RaftLog.applied, r.RaftLog.firstIndex, "}",
@@ -545,6 +544,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	// 对端的当前日志索引位置
 	peerIndex := r.Prs[to].Next - 1
 	if lastIndex < peerIndex {
+		// log.Warnf("no need to append log, [lastIndex: %d, peerIndex: %d]", lastIndex, r.Prs[to].Next)
 		return true
 	}
 
@@ -554,12 +554,18 @@ func (r *Raft) sendAppend(to uint64) bool {
 		if err == ErrCompacted {
 			// 发送生成快照的命令
 			r.sendSnapshot(to)
+			// log.Warn("ErrCompacted, need to send snapshot")
+			return false
 		}
 
+		// log.Errorf("append log to [%d] an err occur: %v", to, err)
 		return false
 	}
 
 	entries := r.RaftLog.Entries(peerIndex+1, lastIndex+1)
+	if err != nil {
+		return false
+	}
 	sendEntries := make([]*pb.Entry, 0)
 	for _, entry := range entries {
 		sendEntries = append(sendEntries, &pb.Entry{
@@ -738,6 +744,7 @@ func (r *Raft) handleAppendResponse(m pb.Message) {
 		r.becomeFollower(m.Term, None)
 		return
 	}
+	// log.Warnf("handle append resp, index: %v, regect: %v", m.GetIndex(), m.Reject == VOTE_APPROVE)
 	if m.Reject == VOTE_APPROVE {
 		// 更新进度到prs
 		r.Prs[m.From].Match = m.GetIndex()
@@ -879,7 +886,10 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	if m.Term < r.Term || meta.Index <= r.RaftLog.committed {
 		// 消息中任期小说明leader过期
 		// 日志小于当前follower已提交日志说明, 说明leader的日志不是最新的,等待后续日志对齐
-		r.sendAppendResponse(m.From, false)
+		log.Warnf(
+			"handle snapshot, send append resp term: %d, messageTerm: %d, commit: %d, meta.commit: %d",
+			r.Term, m.Term, r.RaftLog.committed, meta.Index)
+		r.sendAppendResponse(m.From, VOTE_REJECT)
 		return
 	}
 	r.becomeFollower(m.Term, m.From)
@@ -898,7 +908,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	for _, id := range meta.ConfState.Nodes {
 		r.Prs[id] = &Progress{}
 	}
-	r.sendAppendResponse(m.From, true)
+	r.sendAppendResponse(m.From, VOTE_APPROVE)
 }
 
 // addNode add a new node to raft group

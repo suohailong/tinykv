@@ -36,10 +36,10 @@ func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t
 		ca[cli] = make(chan bool)
 		go runClient(t, cli, ca[cli], fn)
 	}
-	// log.Printf("SpawnClientsAndWait: waiting for clients")
+	log.Infof("SpawnClientsAndWait: waiting for clients")
 	for cli := 0; cli < ncli; cli++ {
 		ok := <-ca[cli]
-		// log.Infof("SpawnClientsAndWait: client %d is done\n", cli)
+		log.Infof("SpawnClientsAndWait: client %d is done\n", cli)
 		if ok == false {
 			t.Fatalf("failure")
 		}
@@ -208,14 +208,12 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 				if (rand.Int() % 1000) < 500 {
 					key := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
 					value := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-					// log.Infof("%d: client new put %v,%v\n", cli, key, value)
 					cluster.MustPut([]byte(key), []byte(value))
 					last = NextValue(last, value)
 					j++
 				} else {
 					start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0)
 					end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
-					// log.Infof("%d: client new scan %v-%v\n", cli, start, end)
 					values := cluster.Scan([]byte(start), []byte(end))
 					v := string(bytes.Join(values, []byte("")))
 					if v != last {
@@ -236,7 +234,8 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			go confchanger(t, cluster, ch_confchange, &done_confchanger)
 		}
 		time.Sleep(5 * time.Second)
-		atomic.StoreInt32(&done_clients, 1)     // tell clients to quit
+		atomic.StoreInt32(&done_clients, 1) // tell clients to quit
+		log.Info("test, tell client to quit")
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 		atomic.StoreInt32(&done_confchanger, 1) // tell confchanger to quit
 		if unreliable || partitions {
@@ -269,6 +268,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 				cluster.StartServer(uint64(i))
 			}
 		}
+		log.Info("test, restart servers")
 
 		for cli := 0; cli < nclients; cli++ {
 			// log.Printf("read from clients %d\n", cli)
@@ -327,6 +327,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			if len(r.GetEndKey()) == 0 {
 				t.Fatalf("region is not split")
 			}
+			log.Info("test, region is split")
 		}
 	}
 }
@@ -539,65 +540,65 @@ func TestTransferLeader3B(t *testing.T) {
 
 func TestBasicConfChange3B(t *testing.T) {
 	cfg := config.NewTestConfig()
-	cluster := NewTestCluster(2, cfg)
+	cluster := NewTestCluster(5, cfg)
 	cluster.Start()
 	defer cluster.Shutdown()
 
 	cluster.MustTransferLeader(1, NewPeer(1, 1))
 	cluster.MustRemovePeer(1, NewPeer(2, 2))
-	// cluster.MustRemovePeer(1, NewPeer(3, 3))
-	// cluster.MustRemovePeer(1, NewPeer(4, 4))
-	// cluster.MustRemovePeer(1, NewPeer(5, 5))
+	cluster.MustRemovePeer(1, NewPeer(3, 3))
+	cluster.MustRemovePeer(1, NewPeer(4, 4))
+	cluster.MustRemovePeer(1, NewPeer(5, 5))
 
 	//now region 1 only has peer: (1, 1)
-	// cluster.MustPut([]byte("k1"), []byte("v1"))
-	// MustGetNone(cluster.engines[2], []byte("k1"))
+	cluster.MustPut([]byte("k1"), []byte("v1"))
+	MustGetNone(cluster.engines[2], []byte("k1"))
 
-	// // add peer (2, 2) to region 1
-	// cluster.MustAddPeer(1, NewPeer(2, 2))
+	// add peer (2, 2) to region 1
+	cluster.MustAddPeer(1, NewPeer(2, 2))
 	// fmt.Println("这里")
-	// cluster.MustPut([]byte("k2"), []byte("v2"))
-	// cluster.MustGet([]byte("k2"), []byte("v2"))
-	// MustGetEqual(cluster.engines[2], []byte("k1"), []byte("v1"))
-	// MustGetEqual(cluster.engines[2], []byte("k2"), []byte("v2"))
+	cluster.MustPut([]byte("k2"), []byte("v2"))
+	cluster.MustGet([]byte("k2"), []byte("v2"))
+	MustGetEqual(cluster.engines[2], []byte("k1"), []byte("v1"))
+	MustGetEqual(cluster.engines[2], []byte("k2"), []byte("v2"))
 
-	// epoch := cluster.GetRegion([]byte("k1")).GetRegionEpoch()
-	// assert.True(t, epoch.GetConfVer() > 1)
+	epoch := cluster.GetRegion([]byte("k1")).GetRegionEpoch()
+	assert.True(t, epoch.GetConfVer() > 1)
 
-	// // peer 5 must not exist
-	// MustGetNone(cluster.engines[5], []byte("k1"))
+	// peer 5 must not exist
+	MustGetNone(cluster.engines[5], []byte("k1"))
 
-	// // add peer (3, 3) to region 1
-	// cluster.MustAddPeer(1, NewPeer(3, 3))
-	// cluster.MustRemovePeer(1, NewPeer(2, 2))
+	// add peer (3, 3) to region 1
+	cluster.MustAddPeer(1, NewPeer(3, 3))
+	cluster.MustRemovePeer(1, NewPeer(2, 2))
 
-	// cluster.MustPut([]byte("k3"), []byte("v3"))
-	// cluster.MustGet([]byte("k3"), []byte("v3"))
-	// MustGetEqual(cluster.engines[3], []byte("k1"), []byte("v1"))
-	// MustGetEqual(cluster.engines[3], []byte("k2"), []byte("v2"))
-	// MustGetEqual(cluster.engines[3], []byte("k3"), []byte("v3"))
+	cluster.MustPut([]byte("k3"), []byte("v3"))
+	cluster.MustGet([]byte("k3"), []byte("v3"))
+	MustGetEqual(cluster.engines[3], []byte("k1"), []byte("v1"))
+	MustGetEqual(cluster.engines[3], []byte("k2"), []byte("v2"))
+	MustGetEqual(cluster.engines[3], []byte("k3"), []byte("v3"))
 
-	// // peer 2 has nothing
-	// MustGetNone(cluster.engines[2], []byte("k1"))
-	// MustGetNone(cluster.engines[2], []byte("k2"))
+	// peer 2 has nothing
+	MustGetNone(cluster.engines[2], []byte("k1"))
+	MustGetNone(cluster.engines[2], []byte("k2"))
 
-	// cluster.MustAddPeer(1, NewPeer(2, 2))
-	// MustGetEqual(cluster.engines[2], []byte("k1"), []byte("v1"))
-	// MustGetEqual(cluster.engines[2], []byte("k2"), []byte("v2"))
-	// MustGetEqual(cluster.engines[2], []byte("k3"), []byte("v3"))
+	cluster.MustAddPeer(1, NewPeer(2, 2))
+	MustGetEqual(cluster.engines[2], []byte("k1"), []byte("v1"))
+	MustGetEqual(cluster.engines[2], []byte("k2"), []byte("v2"))
+	MustGetEqual(cluster.engines[2], []byte("k3"), []byte("v3"))
 
-	// // remove peer (2, 2) from region 1
-	// cluster.MustRemovePeer(1, NewPeer(2, 2))
-	// // add peer (2, 4) to region 1
-	// cluster.MustAddPeer(1, NewPeer(2, 4))
-	// // remove peer (3, 3) from region 1
-	// cluster.MustRemovePeer(1, NewPeer(3, 3))
+	// remove peer (2, 2) from region 1
+	cluster.MustRemovePeer(1, NewPeer(2, 2))
+	// add peer (2, 4) to region 1
+	cluster.MustAddPeer(1, NewPeer(2, 4))
+	// remove peer (3, 3) from region 1
+	cluster.MustRemovePeer(1, NewPeer(3, 3))
 
-	// cluster.MustPut([]byte("k4"), []byte("v4"))
-	// MustGetEqual(cluster.engines[2], []byte("k1"), []byte("v1"))
-	// MustGetEqual(cluster.engines[2], []byte("k4"), []byte("v4"))
-	// MustGetNone(cluster.engines[3], []byte("k1"))
-	// MustGetNone(cluster.engines[3], []byte("k4"))
+	cluster.MustPut([]byte("k4"), []byte("v4"))
+	MustGetEqual(cluster.engines[2], []byte("k1"), []byte("v1"))
+	MustGetEqual(cluster.engines[2], []byte("k4"), []byte("v4"))
+	MustGetNone(cluster.engines[3], []byte("k1"))
+	MustGetNone(cluster.engines[3], []byte("k4"))
 }
 
 func TestConfChangeRecover3B(t *testing.T) {
@@ -607,6 +608,13 @@ func TestConfChangeRecover3B(t *testing.T) {
 
 func TestConfChangeRecoverManyClients3B(t *testing.T) {
 	// Test: restarts, snapshots, conf change, many clients (3B) ...
+	// nclients: 20
+	// unreliable: false, 网络是通的
+	// crash: true , 当前周期完成后重启
+	// partitions: false , 不重新规划网络
+	// maxraftlog: -1, raftlog 日志量的限制, 如果为正不能超过2*maxraftlog
+	// confchange: true 随机的增删节点
+	// split: false size超过1024是否发生region分裂
 	GenericTest(t, "3B", 20, false, true, false, -1, true, false)
 }
 
@@ -654,7 +662,10 @@ func TestOneSplit3B(t *testing.T) {
 
 	// write some data to trigger split
 	for i := 100; i < 200; i++ {
-		cluster.MustPut([]byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
+		key := []byte(fmt.Sprintf("k%d", i))
+		value := []byte(fmt.Sprintf("v%d", i))
+		// log.Infof("key bytes: %d, value bytes: %d", len(key), len(value))
+		cluster.MustPut(key, value)
 	}
 
 	time.Sleep(200 * time.Millisecond)
@@ -677,12 +688,12 @@ func TestOneSplit3B(t *testing.T) {
 }
 
 func TestSplitRecover3B(t *testing.T) {
-	// Test: restarts, snapshots, conf change, one client (3B) ...
+	// Test: restarts, snapshots, split, one client (3B) ...
 	GenericTest(t, "3B", 1, false, true, false, -1, false, true)
 }
 
 func TestSplitRecoverManyClients3B(t *testing.T) {
-	// Test: restarts, snapshots, conf change, many clients (3B) ...
+	// Test: restarts, snapshots, split, many clients (3B) ...
 	GenericTest(t, "3B", 20, false, true, false, -1, false, true)
 }
 

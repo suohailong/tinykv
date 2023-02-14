@@ -41,6 +41,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
 	co := c.coordinator
 	c.RUnlock()
+	// 如果有需要处理的命令通过hertbeat的响应返回给region
 	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }
