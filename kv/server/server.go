@@ -7,6 +7,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
+	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -50,7 +51,54 @@ func (server *Server) Snapshot(stream tinykvpb.TinyKv_SnapshotServer) error {
 // Transactional API.
 func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcpb.GetResponse, error) {
 	// Your Code Here (4B).
-	return nil, nil
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.GetResponse{
+				RegionError: rangeErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+
+	}
+	defer reader.Close()
+	txn := mvcc.NewMvccTxn(reader, req.Version)
+	lock, err := txn.GetLock(req.GetKey())
+	if err != nil {
+		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.GetResponse{
+				RegionError: rangeErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+	}
+	// 如果存在锁,或者锁是在读之后加的
+	if lock != nil || req.Version > lock.Ts {
+		return &kvrpcpb.GetResponse{
+			Error: &kvrpcpb.KeyError{
+				Locked: &kvrpcpb.LockInfo{
+					PrimaryLock: lock.Primary,
+					LockVersion: lock.Ts,
+					Key:         req.GetKey(),
+					LockTtl:     lock.Ttl,
+				},
+			},
+		}, nil
+	}
+	// 获取该key最近提交的值
+	value, err := txn.GetValue(req.GetKey())
+	if err != nil {
+		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.GetResponse{
+				RegionError: rangeErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+	}
+
+	return &kvrpcpb.GetResponse{
+		Value: value,
+	}, nil
 }
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
