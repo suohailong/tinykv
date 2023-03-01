@@ -1,10 +1,12 @@
 package mvcc
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/scheduler/pkg/tsoutil"
 )
@@ -64,6 +66,18 @@ func (txn *MvccTxn) DeleteLock(key []byte) {
 // I.e., the most recent value committed before the start of this transaction.
 func (txn *MvccTxn) GetValue(key []byte) ([]byte, error) {
 	// Your Code Here (4A).
+	// write列
+	iter := txn.Reader.IterCF(engine_util.CfWrite)
+	defer iter.Close()
+	iter.Seek(EncodeKey(key, txn.StartTS))
+	for ; iter.Valid(); iter.Next() {
+		item := iter.Item()
+		userKey := DecodeUserKey(item.Key())
+		if bytes.Equal(key, userKey) {
+			break
+		}
+	}
+
 	return nil, nil
 }
 

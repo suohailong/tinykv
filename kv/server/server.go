@@ -63,6 +63,7 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 	}
 	defer reader.Close()
 	txn := mvcc.NewMvccTxn(reader, req.Version)
+	// 检查一下有没有锁的存在
 	lock, err := txn.GetLock(req.GetKey())
 	if err != nil {
 		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
@@ -72,7 +73,7 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		}
 		return nil, err
 	}
-	// 如果存在锁,或者锁是在读之后加的
+	// 如果存在锁,或者锁是在读之前加的
 	if lock != nil || req.Version > lock.Ts {
 		return &kvrpcpb.GetResponse{
 			Error: &kvrpcpb.KeyError{
@@ -85,7 +86,7 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 			},
 		}, nil
 	}
-	// 获取该key最近提交的值
+	// 获取值
 	value, err := txn.GetValue(req.GetKey())
 	if err != nil {
 		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
@@ -103,11 +104,16 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
 	// Your Code Here (4B).
+	// 1. 先检查一下当前事务开始的这个时间有没有新事物提交
+	// 2. 在检查一下当前事务开始的这个时间有没有锁存在
+	// 3. 写入lock和值
 	return nil, nil
 }
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
 	// Your Code Here (4B).
+	// 1. 查找锁
+	// 2. 写入write 并释放锁
 	return nil, nil
 }
 
