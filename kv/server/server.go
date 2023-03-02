@@ -104,10 +104,94 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
 	// Your Code Here (4B).
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.PrewriteResponse{
+				RegionError: rangeErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+
+	}
+	keyErrors := make([]*kvrpcpb.KeyError, len(req.Mutations))
+	defer reader.Close()
+	txn := mvcc.NewMvccTxn(reader, req.GetStartVersion())
 	// 1. 先检查一下当前事务开始的这个时间有没有新事物提交
-	// 2. 在检查一下当前事务开始的这个时间有没有锁存在
-	// 3. 写入lock和值
-	return nil, nil
+	for _, mu := range req.Mutations {
+		// FIXME: 这里为什么key没有添加开始时间戳
+		write, writeTm, err := txn.MostRecentWrite(mu.GetKey())
+		if err != nil {
+			if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+				return &kvrpcpb.PrewriteResponse{
+					RegionError: rangeErr.RequestErr,
+				}, nil
+			}
+			return nil, err
+		}
+		if write != nil && writeTm > req.GetStartVersion() {
+			keyErrors = append(keyErrors, &kvrpcpb.KeyError{
+				Conflict: &kvrpcpb.WriteConflict{
+					StartTs:    req.StartVersion,
+					ConflictTs: writeTm,
+					Key:        mu.Key,
+					Primary:    req.PrimaryLock,
+				},
+			})
+			continue
+		}
+		// 2. 在检查一下当前事务开始的这个时间有没有锁存在
+		lock, err := txn.GetLock(mu.Key)
+		if err != nil {
+			if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+				return &kvrpcpb.PrewriteResponse{
+					RegionError: rangeErr.RequestErr,
+				}, nil
+			}
+			return nil, err
+		}
+		if lock != nil {
+			keyErrors = append(keyErrors, &kvrpcpb.KeyError{
+				Locked: &kvrpcpb.LockInfo{
+					PrimaryLock: lock.Primary,
+					LockVersion: lock.Ts,
+					Key:         mu.Key,
+					LockTtl:     lock.Ttl,
+				},
+			})
+			continue
+		}
+		// 3. 写入lock和值,缓存到事务中
+		switch mu.Op {
+		case kvrpcpb.Op_Put:
+			txn.PutValue(mu.Key, mu.Value)
+			txn.PutLock(mu.Key, &mvcc.Lock{
+				Primary: req.PrimaryLock,
+				Ts:      req.StartVersion,
+				Ttl:     req.LockTtl,
+				Kind:    mvcc.WriteKindPut,
+			})
+		case kvrpcpb.Op_Del:
+			txn.DeleteValue(mu.Key)
+			txn.PutLock(mu.Key, &mvcc.Lock{
+				Primary: req.PrimaryLock,
+				Ts:      req.StartVersion,
+				Ttl:     req.LockTtl,
+				Kind:    mvcc.WriteKindDelete,
+			})
+		}
+	}
+	err = server.storage.Write(req.Context, txn.Writes())
+	if err != nil {
+		if regionErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.PrewriteResponse{
+				RegionError: regionErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+	}
+
+	return &kvrpcpb.PrewriteResponse{}, nil
 }
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
