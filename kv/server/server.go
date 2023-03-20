@@ -116,6 +116,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 	}
 	keyErrors := make([]*kvrpcpb.KeyError, len(req.Mutations))
 	defer reader.Close()
+	//FIXME: 这里为什么不给所有的key加锁，防止多线程并发
 	txn := mvcc.NewMvccTxn(reader, req.GetStartVersion())
 	// 1. 先检查一下当前事务开始的这个时间有没有新事物提交
 	for _, mu := range req.Mutations {
@@ -196,9 +197,59 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
 	// Your Code Here (4B).
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.CommitResponse{
+				RegionError: rangeErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+	}
+	defer reader.Close()
+	// 给所有的key加锁，防止多线程并发
+	defer server.Latches.ReleaseLatches(req.Keys)
+	// 注意这里是开始时间
+	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
 	// 1. 查找锁
-	// 2. 写入write 并释放锁
-	return nil, nil
+	for _, key := range req.GetKeys() {
+		lock, err := txn.GetLock(key)
+		if err != nil {
+			if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+				return &kvrpcpb.CommitResponse{
+					RegionError: rangeErr.RequestErr,
+				}, nil
+			}
+			return nil, err
+		}
+		if lock == nil {
+			return &kvrpcpb.CommitResponse{}, nil
+		}
+		if lock.Ts != req.StartVersion {
+			// 告诉客户端重试
+			return &kvrpcpb.CommitResponse{
+				Error: &kvrpcpb.KeyError{
+					Retryable: "true",
+				},
+			}, nil
+		}
+		// 2. 如果查找到锁并且锁是自己加的， 写入write 并释放锁
+		txn.PutWrite(key, req.CommitVersion, &mvcc.Write{
+			StartTS: req.StartVersion,
+			Kind:    lock.Kind,
+		})
+		txn.DeleteLock(key)
+	}
+	err = server.storage.Write(req.Context, txn.Writes())
+	if err != nil {
+		if regionErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.CommitResponse{
+				RegionError: regionErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+	}
+	return &kvrpcpb.CommitResponse{}, nil
 }
 
 func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrpcpb.ScanResponse, error) {
