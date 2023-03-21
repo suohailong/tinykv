@@ -254,7 +254,66 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 
 func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrpcpb.ScanResponse, error) {
 	// Your Code Here (4C).
-	return nil, nil
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+			return &kvrpcpb.ScanResponse{
+				RegionError: rangeErr.RequestErr,
+			}, nil
+		}
+		return nil, err
+	}
+	defer reader.Close()
+	txn := mvcc.NewMvccTxn(reader, req.Version)
+
+	scanner := mvcc.NewScanner(req.StartKey, txn)
+	defer scanner.Close()
+
+	var kv = make([]*kvrpcpb.KvPair, int(req.Limit))
+	for i := 0; i < int(req.Limit); i++ {
+		k, v, err := scanner.Next()
+		if err != nil {
+			return nil, err
+		}
+		// 查看当前k上有没有所
+		lock, err := txn.GetLock(k)
+		if err != nil {
+			if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+				return &kvrpcpb.ScanResponse{
+					RegionError: rangeErr.RequestErr,
+				}, nil
+			}
+			return nil, err
+		}
+		// 如果存在锁,或者锁是在读之前加的
+		if lock != nil || req.Version > lock.Ts {
+			kv[i] = &kvrpcpb.KvPair{
+				Error: &kvrpcpb.KeyError{
+					Locked: &kvrpcpb.LockInfo{
+						PrimaryLock: lock.Primary,
+						LockVersion: lock.Ts,
+						Key:         k,
+						LockTtl:     lock.Ttl,
+					},
+				},
+				Key:   k,
+				Value: v,
+			}
+			return &kvrpcpb.ScanResponse{
+				Pairs: kv,
+			}, nil
+		}
+
+		kv[i] = &kvrpcpb.KvPair{
+			Key:   k,
+			Value: v,
+		}
+
+	}
+
+	return &kvrpcpb.ScanResponse{
+		Pairs: kv,
+	}, nil
 }
 
 func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnStatusRequest) (*kvrpcpb.CheckTxnStatusResponse, error) {

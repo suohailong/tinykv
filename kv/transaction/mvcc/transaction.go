@@ -154,6 +154,30 @@ func (txn *MvccTxn) DeleteValue(key []byte) {
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
+	iter := txn.Reader.IterCF(engine_util.CfWrite)
+	defer iter.Close()
+	// 从开头搜索
+	for ; iter.Valid(); iter.Next() {
+		item := iter.Item()
+		userKey := DecodeUserKey(item.Key())
+		if bytes.Equal(key, userKey) {
+			value, err := item.Value()
+			if err != nil {
+				log.Errorf("")
+				return nil, 0, err
+			}
+			write, err := ParseWrite(value)
+			if err != nil {
+				log.Errorf("")
+				return nil, 0, err
+			}
+			// 搜索当前事务的写入
+			if write.StartTS == txn.StartTS {
+				return write, decodeTimestamp(item.Key()), err
+			}
+		}
+	}
+	// 不存在
 	return nil, 0, nil
 }
 
@@ -161,6 +185,28 @@ func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) MostRecentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
+	iter := txn.Reader.IterCF(engine_util.CfWrite)
+	defer iter.Close()
+	// 从开头搜索
+	for ; iter.Valid(); iter.Next() {
+		item := iter.Item()
+		userKey := DecodeUserKey(item.Key())
+		if bytes.Equal(key, userKey) {
+			value, err := item.Value()
+			if err != nil {
+				log.Errorf("")
+				return nil, 0, err
+			}
+			write, err := ParseWrite(value)
+			if err != nil {
+				log.Errorf("")
+				return nil, 0, err
+			}
+			// 搜索最近的写入
+			return write, decodeTimestamp(item.Key()), err
+
+		}
+	}
 	return nil, 0, nil
 }
 
