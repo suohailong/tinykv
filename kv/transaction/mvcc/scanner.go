@@ -1,6 +1,8 @@
 package mvcc
 
 import (
+	"bytes"
+
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/log"
 )
@@ -46,7 +48,7 @@ func (scan *Scanner) Next() ([]byte, []byte, error) {
 		return nil, nil, nil
 	}
 
-	// 获取当前值
+	// 获取当前的最新的值
 	item := scan.iter.Item()
 	currentKey := DecodeUserKey(item.Key())
 	currentTs := decodeTimestamp(item.Key())
@@ -55,25 +57,42 @@ func (scan *Scanner) Next() ([]byte, []byte, error) {
 		item := scan.iter.Item()
 		currentKey = DecodeUserKey(item.Key())
 		currentTs = decodeTimestamp(item.Key())
+	}
 
+	if !scan.iter.Valid() {
+		scan.next = nil
+		return nil, nil, nil
+
+	}
+
+	// 找到下一个key
+	for ; scan.iter.Valid(); scan.iter.Next() {
+		nextkey := DecodeUserKey(scan.iter.Item().Key())
+		if !bytes.Equal(nextkey, currentKey) {
+			scan.next = nextkey
+			break
+		}
+	}
+
+	if !scan.iter.Valid() {
+		scan.next = nil
 	}
 
 	// if bytes.Equal(item.Key(), userKey) {
 	value, err := item.Value()
 	if err != nil {
 		log.Errorf("")
-		return nil, nil, err
+		return currentKey, nil, err
 	}
 	write, err := ParseWrite(value)
 	if err != nil {
 		log.Errorf("")
-		return nil, nil, err
+		return currentKey, nil, err
 	}
 	if write.Kind == WriteKindPut {
 		v, err := scan.txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(item.Key(), write.StartTS))
-		return userKey, v, err
+		return currentKey, v, err
 	}
 	// }
-	iter.Next()
-	return nil, nil, nil
+	return currentKey, nil, nil
 }
