@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pingcap-incubator/tinykv/kv/coprocessor"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
@@ -9,6 +10,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
+	"github.com/pingcap-incubator/tinykv/log"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -75,7 +77,7 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		return nil, err
 	}
 	// 如果存在锁,或者锁是在读之前加的
-	if lock != nil || req.Version > lock.Ts {
+	if lock != nil && req.Version > lock.Ts {
 		return &kvrpcpb.GetResponse{
 			Error: &kvrpcpb.KeyError{
 				Locked: &kvrpcpb.LockInfo{
@@ -97,6 +99,11 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		}
 		return nil, err
 	}
+	if value == nil {
+		return &kvrpcpb.GetResponse{
+			NotFound: true,
+		}, nil
+	}
 
 	return &kvrpcpb.GetResponse{
 		Value: value,
@@ -115,7 +122,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 		return nil, err
 
 	}
-	keyErrors := make([]*kvrpcpb.KeyError, len(req.Mutations))
+	keyErrors := make([]*kvrpcpb.KeyError, 0)
 	defer reader.Close()
 	//FIXME: 这里为什么不给所有的key加锁，防止多线程并发
 	txn := mvcc.NewMvccTxn(reader, req.GetStartVersion())
@@ -131,6 +138,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			}
 			return nil, err
 		}
+		fmt.Printf("write: %+v\n", write)
 		if write != nil && writeTm > req.GetStartVersion() {
 			keyErrors = append(keyErrors, &kvrpcpb.KeyError{
 				Conflict: &kvrpcpb.WriteConflict{
@@ -152,6 +160,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			}
 			return nil, err
 		}
+		fmt.Printf("lock: %+v\n", lock)
 		if lock != nil {
 			keyErrors = append(keyErrors, &kvrpcpb.KeyError{
 				Locked: &kvrpcpb.LockInfo{
@@ -183,6 +192,12 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			})
 		}
 	}
+	if len(keyErrors) > 0 {
+		return &kvrpcpb.PrewriteResponse{
+			Errors: keyErrors,
+		}, nil
+
+	}
 	err = server.storage.Write(req.Context, txn.Writes())
 	if err != nil {
 		if regionErr, ok := err.(*raft_storage.RegionError); ok {
@@ -209,6 +224,7 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 	}
 	defer reader.Close()
 	// 给所有的key加锁，防止多线程并发
+	server.Latches.WaitForLatches(req.Keys)
 	defer server.Latches.ReleaseLatches(req.Keys)
 	// 注意这里是开始时间
 	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
@@ -224,6 +240,7 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 			return nil, err
 		}
 		if lock == nil {
+			log.Errorf("commit key: %s, but no lock found", key)
 			return &kvrpcpb.CommitResponse{}, nil
 		}
 		if lock.Ts != req.StartVersion {

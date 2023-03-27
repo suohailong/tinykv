@@ -63,13 +63,10 @@ func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 		log.Errorf("")
 		return nil, err
 	}
-	lock, err := ParseLock(lockOrigin)
-	if err != nil {
-		log.Errorf("")
-		return nil, err
+	if lockOrigin == nil {
+		return nil, nil
 	}
-	return lock, nil
-
+	return ParseLock(lockOrigin)
 }
 
 // PutLock adds a key/lock to this transaction.
@@ -88,7 +85,7 @@ func (txn *MvccTxn) PutLock(key []byte, lock *Lock) {
 func (txn *MvccTxn) DeleteLock(key []byte) {
 	// Your Code Here (4A).
 	txn.writes = append(txn.writes, storage.Modify{
-		Data: storage.Put{
+		Data: storage.Delete{
 			Key: key,
 			Cf:  engine_util.CfLock,
 		},
@@ -118,9 +115,10 @@ func (txn *MvccTxn) GetValue(key []byte) ([]byte, error) {
 				log.Errorf("")
 				return nil, err
 			}
-			if write.Kind == WriteKindPut {
-				return txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, write.StartTS))
+			if write.Kind != WriteKindPut {
+				return nil, nil
 			}
+			return txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, write.StartTS))
 		}
 	}
 	// 不存在
@@ -143,7 +141,7 @@ func (txn *MvccTxn) PutValue(key []byte, value []byte) {
 func (txn *MvccTxn) DeleteValue(key []byte) {
 	// Your Code Here (4A).
 	txn.writes = append(txn.writes, storage.Modify{
-		Data: storage.Put{
+		Data: storage.Delete{
 			Key: EncodeKey(key, txn.StartTS),
 			Cf:  engine_util.CfDefault,
 		},
