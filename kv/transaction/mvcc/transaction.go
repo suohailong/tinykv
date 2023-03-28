@@ -208,6 +208,23 @@ func (txn *MvccTxn) MostRecentWrite(key []byte) (*Write, uint64, error) {
 	return nil, 0, nil
 }
 
+func (txn *MvccTxn) CurrentValue(key []byte) ([]byte, error) {
+	return txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, txn.StartTS))
+}
+
+func (txn *MvccTxn) Rollback(key []byte, locked bool) {
+	txn.PutWrite(key, txn.StartTS, &Write{
+		StartTS: txn.StartTS,
+		Kind:    WriteKindRollback,
+	})
+	if locked {
+		// 删除锁
+		txn.DeleteLock(key)
+	}
+	// 删除当前事务的值
+	txn.DeleteValue(key)
+}
+
 // EncodeKey encodes a user key and appends an encoded timestamp to a key. Keys and timestamps are encoded so that
 // timestamped keys are sorted first by key (ascending), then by timestamp (descending). The encoding is based on
 // https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format.

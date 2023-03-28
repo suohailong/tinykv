@@ -425,7 +425,6 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 
 func (server *Server) KvBatchRollback(_ context.Context, req *kvrpcpb.BatchRollbackRequest) (*kvrpcpb.BatchRollbackResponse, error) {
 	// Your Code Here (4C).
-
 	reader, err := server.storage.Reader(req.Context)
 	if err != nil {
 		if rangeErr, ok := err.(*raft_storage.RegionError); ok {
@@ -461,25 +460,35 @@ func (server *Server) KvBatchRollback(_ context.Context, req *kvrpcpb.BatchRollb
 		if err != nil {
 			return nil, err
 		}
-
 		// 如果锁的ts 不等于事务的开始时间，说明锁已经被其他事务拥有
 		if lock != nil && lock.Ts != txn.StartTS {
-			return &kvrpcpb.BatchRollbackResponse{
-				Error: &kvrpcpb.KeyError{
-					Abort: "true",
-				},
-			}, nil
+			// 如果其他事务加了锁，这里只删除本事务的值， 不删除其他事务的锁
+			txn.Rollback(k, false)
+			continue
 		}
 
-		if lock != nil {
-			txn.DeleteLock(k)
+		// 没有锁或是有当前事务的锁，再看下当前有没有值
+		value, err := txn.CurrentValue(k)
+		if err != nil {
+			if regionErr, ok := err.(*raft_storage.RegionError); ok {
+				return &kvrpcpb.BatchRollbackResponse{
+					RegionError: regionErr.RequestErr,
+				}, nil
+			}
+			return nil, err
 		}
-		txn.DeleteValue(k)
-		// 删除值，删除锁
-		txn.PutWrite(k, req.StartVersion, &mvcc.Write{
-			StartTS: req.StartVersion,
-			Kind:    mvcc.WriteKindRollback,
-		})
+		if value == nil {
+			// 没有值，说明已经回滚
+			txn.Rollback(k, true)
+			continue
+		}
+
+		// 有值，说明已经提交，有锁就删除锁
+		if lock == nil {
+			continue
+		}
+		// 没值但是有锁, 删除锁并回滚
+		txn.Rollback(k, true)
 	}
 	err = server.storage.Write(req.Context, txn.Writes())
 	if err != nil {
