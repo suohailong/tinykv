@@ -4,7 +4,6 @@ import (
 	"bytes"
 
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
-	"github.com/pingcap-incubator/tinykv/log"
 )
 
 // Scanner is used for reading multiple sequential key/value pairs from the storage layer. It is aware of the implementation
@@ -36,63 +35,51 @@ func (scan *Scanner) Close() {
 // Next returns the next key/value pair from the scanner. If the scanner is , then it will return `nil, nil, nil`.
 func (scan *Scanner) Next() ([]byte, []byte, error) {
 	// Your Code Here (4C).
-	// defer iter.Close()
 	if scan.next == nil {
 		return nil, nil, nil
 	}
-
 	key := scan.next
 	scan.iter.Seek(EncodeKey(key, scan.txn.StartTS))
 	if !scan.iter.Valid() {
 		scan.next = nil
 		return nil, nil, nil
 	}
-
-	// 获取当前的最新的值
+	// get current key value item
 	item := scan.iter.Item()
-	currentKey := DecodeUserKey(item.Key())
+	currentUserkey := DecodeUserKey(item.Key())
 	currentTs := decodeTimestamp(item.Key())
 	for scan.iter.Valid() && currentTs > scan.txn.StartTS {
-		scan.iter.Seek(EncodeKey(currentKey, scan.txn.StartTS))
-		item := scan.iter.Item()
-		currentKey = DecodeUserKey(item.Key())
+		scan.iter.Seek(EncodeKey(currentUserkey, scan.txn.StartTS))
+		item = scan.iter.Item()
+		currentUserkey = DecodeUserKey(item.Key())
 		currentTs = decodeTimestamp(item.Key())
 	}
-
 	if !scan.iter.Valid() {
 		scan.next = nil
 		return nil, nil, nil
-
 	}
-
-	// 找到下一个key
+	// find next key
 	for ; scan.iter.Valid(); scan.iter.Next() {
-		nextkey := DecodeUserKey(scan.iter.Item().Key())
-		if !bytes.Equal(nextkey, currentKey) {
-			scan.next = nextkey
+		nextUserKey := DecodeUserKey(scan.iter.Item().Key())
+		if !bytes.Equal(nextUserKey, currentUserkey) {
+			scan.next = nextUserKey
 			break
 		}
 	}
-
 	if !scan.iter.Valid() {
 		scan.next = nil
 	}
-
-	// if bytes.Equal(item.Key(), userKey) {
 	value, err := item.Value()
 	if err != nil {
-		log.Errorf("")
-		return currentKey, nil, err
+		return currentUserkey, nil, err
 	}
 	write, err := ParseWrite(value)
 	if err != nil {
-		log.Errorf("")
-		return currentKey, nil, err
+		return currentUserkey, nil, err
 	}
-	if write.Kind == WriteKindPut {
-		v, err := scan.txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(item.Key(), write.StartTS))
-		return currentKey, v, err
+	if write.Kind != WriteKindPut {
+		return currentUserkey, nil, nil
 	}
-	// }
-	return currentKey, nil, nil
+	v, err := scan.txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(currentUserkey, write.StartTS))
+	return currentUserkey, v, err
 }

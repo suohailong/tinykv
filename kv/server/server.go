@@ -281,16 +281,23 @@ func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrp
 		}
 		return nil, err
 	}
-	defer reader.Close()
+	fmt.Println("starts: ", req.Version)
 	txn := mvcc.NewMvccTxn(reader, req.Version)
-
 	scanner := mvcc.NewScanner(req.StartKey, txn)
 	defer scanner.Close()
 
-	var kv = make([]*kvrpcpb.KvPair, int(req.Limit))
-	for i := 0; i < int(req.Limit); i++ {
+	var kv = make([]*kvrpcpb.KvPair, 0)
+	for i := 0; i < int(req.Limit); {
 		k, v, err := scanner.Next()
+		if k == nil && v == nil && err == nil {
+			break
+		}
 		if err != nil {
+			if rangeErr, ok := err.(*raft_storage.RegionError); ok {
+				return &kvrpcpb.ScanResponse{
+					RegionError: rangeErr.RequestErr,
+				}, nil
+			}
 			return nil, err
 		}
 		// 查看当前k上有没有所
@@ -304,8 +311,8 @@ func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrp
 			return nil, err
 		}
 		// 如果存在锁,或者锁是在读之前加的
-		if lock != nil || req.Version > lock.Ts {
-			kv[i] = &kvrpcpb.KvPair{
+		if lock != nil && req.Version >= lock.Ts {
+			kv = append(kv, &kvrpcpb.KvPair{
 				Error: &kvrpcpb.KeyError{
 					Locked: &kvrpcpb.LockInfo{
 						PrimaryLock: lock.Primary,
@@ -314,14 +321,14 @@ func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrp
 						LockTtl:     lock.Ttl,
 					},
 				},
+			})
+			i++
+		} else if v != nil {
+			kv = append(kv, &kvrpcpb.KvPair{
 				Key:   k,
 				Value: v,
-			}
-		} else {
-			kv[i] = &kvrpcpb.KvPair{
-				Key:   k,
-				Value: v,
-			}
+			})
+			i++
 		}
 
 	}
@@ -344,7 +351,7 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 		return nil, err
 	}
 	defer reader.Close()
-	txn := mvcc.NewMvccTxn(reader, req.GetCurrentTs())
+	txn := mvcc.NewMvccTxn(reader, req.LockTs)
 	// 查看当前的写入，观察是提交还是回滚
 	write, commitTs, err := txn.CurrentWrite(req.PrimaryKey)
 	if err != nil {
@@ -357,8 +364,11 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 				CommitVersion: commitTs,
 				Action:        kvrpcpb.Action_NoAction,
 			}, nil
+		} else {
+			return &kvrpcpb.CheckTxnStatusResponse{
+				Action: kvrpcpb.Action_NoAction,
+			}, nil
 		}
-
 	}
 
 	//没有写入或是已经回滚rollback, 再检查锁
@@ -367,13 +377,7 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 		return nil, err
 	}
 	if lock == nil {
-		// 如果锁不存在, 说明已经rollback
-		txn.DeleteValue(req.PrimaryKey)
-		// 删除值，删除锁
-		txn.PutWrite(req.PrimaryKey, req.CurrentTs, &mvcc.Write{
-			StartTS: txn.StartTS,
-			Kind:    mvcc.WriteKindRollback,
-		})
+		txn.Rollback(req.PrimaryKey, false)
 		if err := server.storage.Write(req.Context, txn.Writes()); err != nil {
 			if regionErr, ok := err.(*raft_storage.RegionError); ok {
 				return &kvrpcpb.CheckTxnStatusResponse{
@@ -393,12 +397,7 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 		// 如果锁存在
 		if mvcc.PhysicalTime(req.CurrentTs)-mvcc.PhysicalTime(lock.Ts) >= lock.Ttl {
 			// 锁超时, 移除锁和值返回回滚
-			txn.DeleteLock(req.PrimaryKey)
-			txn.DeleteValue(req.PrimaryKey)
-			txn.PutWrite(req.PrimaryKey, req.CurrentTs, &mvcc.Write{
-				StartTS: txn.StartTS,
-				Kind:    mvcc.WriteKindRollback,
-			})
+			txn.Rollback(req.PrimaryKey, true)
 			if err := server.storage.Write(req.Context, txn.Writes()); err != nil {
 				if regionErr, ok := err.(*raft_storage.RegionError); ok {
 					return &kvrpcpb.CheckTxnStatusResponse{

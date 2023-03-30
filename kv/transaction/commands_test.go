@@ -145,6 +145,7 @@ func (builder *testBuilder) assert(kvs []kv) {
 
 // assertLen asserts the size of one of the column families.
 func (builder *testBuilder) assertLen(cf string, size int) {
+	fmt.Println("这里吗", cf, builder.mem.Len(cf))
 	assert.Equal(builder.t, size, builder.mem.Len(cf))
 }
 
@@ -207,5 +208,6 @@ func (builder *testBuilder) scanRequest(startKey []byte, limit uint32) *kvrpcpb.
 	req.StartKey = startKey
 	req.Limit = limit
 	req.Version = builder.nextTs()
+	
 	return &req
 }

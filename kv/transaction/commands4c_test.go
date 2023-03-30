@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
@@ -374,6 +375,7 @@ func TestScanAll4C(t *testing.T) {
 
 	assert.Nil(t, resp.RegionError)
 	assert.Equal(t, 11, len(resp.Pairs))
+	fmt.Println(1111, resp.Pairs)
 	assert.Equal(t, []byte{1}, resp.Pairs[0].Key)
 	assert.Equal(t, []byte{50}, resp.Pairs[0].Value)
 	assert.Equal(t, []byte{199}, resp.Pairs[10].Key)
